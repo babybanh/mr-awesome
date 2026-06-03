@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      if (window.location.protocol === "file:") {
+        window.location.replace("http://localhost:5173/");
+      }
+    </script>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>The Awesome Superhero Game</title>
+  </head>
+  <body>
+    <main id="app-shell">
+      <section id="game-composition" aria-label="The Awesome Superhero Game">
+        <header id="top-layer">
+          <div class="dialogue-strip" aria-live="polite">
+            <div class="avatar-box" data-villain-avatar aria-hidden="true"><span>N</span></div>
+            <div class="dialogue-copy">
+              <span data-speaker>Mr. Not So Awesome</span>
+              <p data-message>Mr. Not So Awesome is waiting.</p>
+            </div>
+          </div>
+        </header>
+
+        <section id="game-board" aria-label="Stage 1 square game area">
+          <div id="game-view"></div>
+          <div class="gameplay-zoom-guide" data-gameplay-zoom-guide hidden aria-hidden="true"></div>
+          <div id="stage-clear" class="center-overlay" hidden>
+            <div>
+              <strong>Stage Clear</strong>
+              <span>Mr. Not So Awesome has been reached.</span>
+              <button type="button" data-action="restart">Replay</button>
+            </div>
+          </div>
+          <div id="crash-overlay" class="center-overlay" hidden>
+            <div>
+              <strong>Try Again</strong>
+              <span>Even superheroes check traffic.</span>
+              <button type="button" data-action="restart">Restart</button>
+            </div>
+          </div>
+        </section>
+
+        <footer id="bottom-layer">
+          <div class="bottom-info">
+            <div class="title-lockup">
+              <span class="series-kicker">PIK Composition Contest 2026</span>
+              <h1>The Awesome Superhero Game</h1>
+            </div>
+            <div class="status-strip" aria-live="polite">
+              <span data-phase>Ready</span>
+              <strong><span>Score</span><span data-score>0</span></strong>
+              <strong><span>Pancakes</span><span data-pancakes>0</span></strong>
+              <strong><span>Best</span><span data-best>0</span></strong>
+            </div>
+          </div>
+          <div class="dpad" aria-label="Movement controls">
+            <button type="button" data-move="forward" class="dpad-button dpad-up" aria-label="Move forward">↑</button>
+            <button type="button" data-move="left" class="dpad-button dpad-left" aria-label="Move left">←</button>
+            <button type="button" data-move="backward" class="dpad-button dpad-down" aria-label="Move backward">↓</button>
+            <button type="button" data-move="right" class="dpad-button dpad-right" aria-label="Move right">→</button>
+          </div>
+          <div class="bottom-actions">
+            <button type="button" data-action="pause" aria-label="Pause">II</button>
+            <button type="button" data-action="restart" aria-label="Restart">↻</button>
+            <button type="button" data-toggle-map>Map</button>
+          </div>
+        </footer>
+      </section>
+
+      <aside id="map-drawer" hidden aria-label="Stage Map Textbox">
+        <div class="drawer-head">
+          <strong>Stage Map Textbox</strong>
+          <span data-map-status data-tone="neutral">Ready</span>
+          <button type="button" class="drawer-close" data-toggle-map aria-label="Close stage map">X</button>
+        </div>
+        <textarea data-stage-map spellcheck="false" aria-label="Stage 1 map text"></textarea>
+        <div class="drawer-actions">
+          <button type="button" data-stage-apply>Apply Map</button>
+          <button type="button" data-stage-copy>Copy Map</button>
+          <button type="button" data-stage-reset>Reset Stage</button>
+          <button type="button" data-stage-validate>Validate Map</button>
+          <button type="button" data-feedback-copy>Copy Feedback Block</button>
+          <button type="button" data-edit-toggle aria-pressed="false">Edit Mode</button>
+        </div>
+        <div class="drawer-camera" data-edit-camera-panel hidden>
+          <label>
+            <span>Avatar Character</span>
+            <select data-avatar-character aria-label="Dialogue avatar character"></select>
+          </label>
+          <label>
+            <span>Avatar Background</span>
+            <select data-avatar-background aria-label="Dialogue avatar background color"></select>
+          </label>
+          <label>
+            <span>Button Style</span>
+            <select data-control-style aria-label="On-screen button style"></select>
+          </label>
+          <label>
+            <span>Background</span>
+            <select data-background-theme aria-label="Temporary background color option"></select>
+          </label>
+          <label>
+            <span>Border Style</span>
+            <select data-border-style aria-label="Temporary border style option"></select>
+          </label>
+          <label>
+            <span>Dialogue Panel</span>
+            <select data-dialogue-panel aria-label="Temporary dialogue panel color option"></select>
+          </label>
+          <label>
+            <span>Editor Angle</span>
+            <select data-camera-preset aria-label="Editor camera angle"></select>
+          </label>
+          <label>
+            <span>Editor Zoom</span>
+            <span class="zoom-range-wrap">
+              <input data-camera-zoom type="range" min="90" max="190" step="5" value="150" aria-label="Editor camera zoom" />
+              <span class="gameplay-zoom-mark" aria-hidden="true"></span>
+            </span>
+          </label>
+          <div class="avatar-drag-control">
+            <span>Avatar Vertical</span>
+            <button type="button" class="avatar-drag-pad" data-avatar-drag aria-label="Drag avatar portrait up or down">
+              <span></span>
+            </button>
+          </div>
+          <div class="avatar-zoom-control">
+            <span>Avatar Zoom</span>
+            <div class="avatar-zoom-buttons">
+              <button type="button" data-avatar-zoom-step="-10" aria-label="Zoom avatar out">−</button>
+              <button type="button" data-avatar-zoom-reset>Default</button>
+              <button type="button" data-avatar-zoom-step="10" aria-label="Zoom avatar in">+</button>
+            </div>
+          </div>
+        </div>
+        <textarea data-stage-validation spellcheck="false" readonly aria-label="Stage 1 validation output"></textarea>
+      </aside>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
