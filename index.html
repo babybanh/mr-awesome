@@ -7,8 +7,19 @@
         window.location.replace("http://localhost:5173/");
       }
     </script>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="The Awesome Superhero Game, a pancake-powered superhero chase for the Piano Inspires Kids Composition Contest." />
+    <meta name="theme-color" content="#071017" />
+    <link rel="icon" type="image/png" href="/assets/meta/mr-awesome-icon.png" />
+    <link rel="apple-touch-icon" href="/assets/meta/apple-touch-icon.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="The Awesome Superhero Game" />
+    <meta property="og:description" content="A pancake-powered superhero chase game." />
+    <meta property="og:image" content="/assets/meta/mr-awesome-preview.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="The Awesome Superhero Game" />
+    <meta name="twitter:description" content="A pancake-powered superhero chase game." />
+    <meta name="twitter:image" content="/assets/meta/mr-awesome-preview.png" />
     <title>The Awesome Superhero Game</title>
   </head>
   <body>
@@ -26,7 +37,22 @@
 
         <section id="game-board" aria-label="Stage 1 square game area">
           <div id="game-view"></div>
+          <div class="opening-tutorial-board" aria-hidden="true">
+            <div class="opening-tutorial-focus">
+              <img class="opening-tutorial-asset opening-tutorial-hero" src="/assets/opening/mr-awesome-intro.png" alt="" />
+              <img class="opening-tutorial-asset opening-tutorial-pancake" src="/assets/opening/pancake-intro.png" alt="" />
+            </div>
+          </div>
           <div class="gameplay-zoom-guide" data-gameplay-zoom-guide hidden aria-hidden="true"></div>
+          <div class="lane-hover-card" data-lane-hover hidden>
+            <span>Lane row</span>
+            <code data-lane-hover-code></code>
+            <textarea data-lane-hover-text spellcheck="false" aria-label="Selected lane row text" hidden></textarea>
+            <button type="button" data-lane-hover-copy>Copy</button>
+            <button type="button" data-lane-hover-edit>Quick Edit</button>
+            <button type="button" data-lane-hover-apply hidden>Apply</button>
+            <button type="button" data-lane-hover-cancel hidden>Cancel</button>
+          </div>
           <div id="stage-clear" class="center-overlay" hidden>
             <div>
               <strong>Stage Clear</strong>
@@ -49,6 +75,7 @@
               <span class="series-kicker">PIK Composition Contest 2026</span>
               <h1>The Awesome Superhero Game</h1>
             </div>
+            <button class="credits-trigger" type="button" data-credits-open>Credits</button>
             <div class="status-strip" aria-live="polite">
               <span data-phase>Ready</span>
               <strong><span>Score</span><span data-score>0</span></strong>
@@ -67,7 +94,44 @@
             <button type="button" data-action="restart" aria-label="Restart">↻</button>
             <button type="button" data-toggle-map>Map</button>
           </div>
+          <button class="music-trigger" type="button" data-music-toggle aria-label="Mute music" aria-pressed="true">
+            <svg class="sound-icon sound-icon-on" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 9v6h4l5 4V5L7 9H3z"></path>
+              <path d="M16 8.5a5 5 0 0 1 0 7"></path>
+              <path d="M18.5 6a8.5 8.5 0 0 1 0 12"></path>
+            </svg>
+            <svg class="sound-icon sound-icon-off" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 9v6h4l5 4V5L7 9H3z"></path>
+              <path d="M16 9l5 5"></path>
+              <path d="M21 9l-5 5"></path>
+            </svg>
+          </button>
         </footer>
+
+        <div class="modal-overlay credits-modal" data-credits-modal hidden role="dialog" aria-modal="true" aria-label="Credits">
+          <div class="modal-card" role="document">
+            <button class="modal-close" type="button" data-credits-close aria-label="Close credits">X</button>
+            <h2 class="modal-title">The Awesome Superhero Game</h2>
+            <section class="credits-copy" aria-label="Music and characters credit">
+              <span>Music and characters by</span>
+              <strong class="credits-name" data-credit-student-name>Adam</strong>
+              <a class="credits-link" data-credit-student-video target="_blank" rel="noopener noreferrer" aria-label="Watch Adam’s composition on YouTube">Watch video ▶</a>
+            </section>
+            <section class="credits-copy" aria-label="Game design and development credit">
+              <span>Game created by</span>
+              <strong class="credits-name" data-credit-developer-name>Le Binh Anh Nguyen</strong>
+              <a class="credits-link" data-credit-developer-url target="_blank" rel="noopener noreferrer" aria-label="Visit Le Binh Anh Nguyen’s faculty page">Faculty page ↗</a>
+            </section>
+            <section class="credits-copy" aria-label="Contest credit">
+              <span>From the</span>
+              <strong class="credits-name" data-credit-contest-name>Piano Inspires Kids Composition Contest</strong>
+              <div class="credits-link-row">
+                <a class="credits-link" data-credit-contest-playlist target="_blank" rel="noopener noreferrer" aria-label="Watch Piano Inspires Kids Composition Contest winners playlist on YouTube">Winners playlist ▶</a>
+                <a class="credits-link" data-credit-contest-magazine target="_blank" rel="noopener noreferrer" aria-label="Read the Piano Inspires Kids magazine">Magazine ↗</a>
+              </div>
+            </section>
+          </div>
+        </div>
       </section>
 
       <aside id="map-drawer" hidden aria-label="Stage Map Textbox">

@@ -13,13 +13,14 @@ export const PLAYER = {
   hitboxWidth: 0.58,
 } as const;
 
-export type LaneKind = "grass" | "road" | "river";
+export type LaneKind = "grass" | "road" | "river" | "train";
 export type GroundTerrain = "grass" | "dirt";
 export type Direction = -1 | 1;
 export type GamePhase = "ready" | "running" | "paused" | "crashed" | "complete";
+export type StagePlayMode = "introPancakes" | "summoning" | "chase" | "finalSequence" | "postVictoryTutorial";
 export type MoveAction = "forward" | "backward" | "left" | "right";
 export type GameAction = MoveAction | "pause" | "restart";
-export type StageObjectKind = "tree" | "building" | "pancake" | "target";
+export type StageObjectKind = "tree" | "building" | "pancake" | "target" | "warning" | "billboard";
 export type StageAssetId =
   | "house01"
   | "house02"
@@ -32,17 +33,16 @@ export type StageAssetId =
   | "industrial01"
   | "industrial02"
   | "industrial03"
-  | "parkTile01"
-  | "parkTile02"
-  | "parkTile03"
-  | "parkTile04"
-  | "grassWaterTile"
   | "tree03"
   | "tree05"
   | "tree01"
   | "tree02"
   | "tree04"
-  | "pancake";
+  | "pancake"
+  | "warningSign01"
+  | "warningSign02"
+  | "billboard01"
+  | "billboard02";
 export type StageEditableAssetId = StageAssetId;
 
 export interface StageAssetSkin {
@@ -57,6 +57,8 @@ export interface RoadTuning {
   speedCode: "S" | "M" | "F";
   gapCode: "S" | "M" | "L";
   densityCode: "L" | "M" | "H";
+  colorScheme: "direction" | "mixed" | "red" | "blue" | "yellow" | "mint" | "purple" | "orange";
+  seed: number;
   cover: "none";
 }
 
@@ -64,6 +66,13 @@ export interface RiverTuning {
   logSize: "S" | "M" | "L";
   speedCode: "S" | "M" | "F";
   gapCode: "S" | "M" | "L";
+}
+
+export interface TrainTuning {
+  trainSize: "S" | "M" | "L";
+  speedCode: "S" | "M" | "F";
+  gapCode: "S" | "M" | "L";
+  warnCode: "S" | "M" | "L";
 }
 
 export interface LaneState {
@@ -76,6 +85,7 @@ export interface LaneState {
   collectibles: number[];
   road?: RoadTuning;
   river?: RiverTuning;
+  train?: TrainTuning;
   speed: number;
   gap: number;
   length: number;
@@ -107,7 +117,27 @@ export interface StageDefinition {
 export interface StageRuntime {
   id: 1;
   name: string;
+  mode: StagePlayMode;
+  playerStart: GridPoint;
   target: GridPoint & { visible: boolean };
+  summonMarker: GridPoint;
+  firstPancakeAt?: number;
+  summonStartedAt?: number;
+  revealConversationAdvanceSeconds?: number;
+  stolenPancakes: Set<string>;
+  stolenPancakesStartedAt?: number;
+  targetSpawnHistory: GridPoint[];
+  targetEscape?: GridPoint & { startedAt: number };
+  targetPending?: GridPoint;
+  targetRevealAt?: number;
+  introCameraHandoffDone: boolean;
+  introCameraHandoffStartedAt?: number;
+  introCameraHandoffReleaseAt?: number;
+  catchCount: number;
+  finalStartedAt?: number;
+  finalRescueStartedAt?: number;
+  finalPoofStartedAt?: number;
+  postVictoryStartedAt?: number;
   targetReachCompletesStage: boolean;
   lastEvent?: string;
 }
@@ -137,7 +167,7 @@ export interface QueuedMove {
 }
 
 export interface MovingSpan {
-  kind: "vehicle" | "platform";
+  kind: "vehicle" | "platform" | "train";
   centerX: number;
   z: number;
   length: number;

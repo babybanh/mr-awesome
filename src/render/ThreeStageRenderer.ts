@@ -3,7 +3,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MTLLoader } from "three/examples/jsm/loaders/MTLLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { GRID, type GameState, type GridPoint, type LaneState, type StageAssetId, type StageObjectKind, type StagePlacedObject } from "../game/types";
-import { getMovingSpans, getPlayerDisplayPosition, pancakeKey } from "../game/simulation";
+import { getMovingSpans, getPlayerDisplayPosition, isTrainWarningActive, pancakeKey } from "../game/simulation";
 
 const ASSET_PATHS = {
   player: "/assets/characters/TexturedMeshBright.glb",
@@ -108,6 +108,11 @@ const PALETTE = {
   roadBase: 0x4f545b,
   roadAlt: 0x444a50,
   roadMarking: 0xe9ece7,
+  trackBase: 0x58504c,
+  railMetal: 0xb9c3c6,
+  railTie: 0x5a3f31,
+  trainBody: 0x222934,
+  trainStripe: 0xf0c247,
   riverBase: 0x42a6d9,
   riverAlt: 0x3896ca,
   waterMark: 0xbcecff,
@@ -124,6 +129,12 @@ const PALETTE = {
   pancakeBase: 0xffcf62,
   pancakeAlt: 0xe98622,
   butterColor: 0xffec6d,
+  warningYellow: 0xffd34d,
+  warningRed: 0xe14642,
+  billboardPost: 0x6e4429,
+  billboardFace: 0xf4efd8,
+  billboardFrame: 0x523d2f,
+  billboardAccent: 0xd8464a,
   carYellow: 0xf0c247,
   playerRed: 0xff4638,
   playerYellow: 0xffd84e,
@@ -133,6 +144,18 @@ const PALETTE = {
   villainDark: 0x171821,
   shadowColor: 0x2a2e36,
 } as const;
+
+const BILLBOARD_COPY = [
+  ["WELCOME TO", "AWESOME TOWN"],
+  ["NICE TRY", "HERO"],
+  ["FRIENDS", "THIS WAY"],
+  ["WATCH FOR", "GATORS"],
+  ["BIG", "LAKES"],
+  ["BIGGER", "ROADS"],
+  ["SECRET", "SHORTCUT"],
+  ["UP", "THE PEAKS"],
+  ["OUT OF", "ROAD"],
+] as const;
 
 const MR_AWESOME_PLAYER_SCALE = 0.52;
 const MR_AWESOME_PLAYER_ROTATION_Y = Math.PI;
@@ -208,11 +231,18 @@ export const CAMERA_PRESET_OPTIONS = Object.entries(CAMERA_PRESETS).map(([id, pr
 
 export const DEFAULT_CAMERA_PRESET: CameraPresetId = "lowPreview";
 export const DEFAULT_CAMERA_ZOOM_PERCENT = 150;
+const REVEAL_CAMERA_ZOOM_PERCENT = 150;
+const CHASE_CAMERA_ZOOM_PERCENT = 118;
+const CHASE_CAMERA_AHEAD_OFFSET_ROWS = 2.15;
+const ESCAPE_POP_SECONDS = 0.62;
+const DECORATIVE_LOG_SPEED_MULTIPLIER = 1.2;
 
 const CAMERA_SPEC = {
   smoothingSeconds: 0.14,
   sideFollowRatio: 0.45,
   sideFollowClamp: 3.25,
+  bottomAnchorPlayerZ: 2,
+  topBoundaryLeadRows: 7,
   targetAheadRows: 2.6,
   foregroundPadding: 0.1,
   backDistance: 9.2,
@@ -225,6 +255,18 @@ interface LoadedModel {
   size: THREE.Vector3;
 }
 
+interface RenderWindow {
+  minZ: number;
+  maxZ: number;
+}
+
+interface EscapeVisual {
+  yOffset: number;
+  zOffset: number;
+  scale: number;
+  opacity: number;
+}
+
 export interface RenderEditSelection {
   x: number;
   z: number;
@@ -233,24 +275,36 @@ export interface RenderEditSelection {
   copy?: boolean;
 }
 
+export interface RenderOptions {
+  useStageCamera?: boolean;
+}
+
 export class ThreeStageRenderer {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.OrthographicCamera(-8, 8, 8, -8, 0.1, 80);
   private readonly renderer: THREE.WebGLRenderer;
   private readonly world = new THREE.Group();
   private readonly boxGeometry = new THREE.BoxGeometry(1, 1, 1);
+  private readonly planeGeometry = new THREE.PlaneGeometry(1, 1);
   private readonly materials = new Map<string, THREE.Material>();
+  private readonly billboardTextMaterials = new Map<string, THREE.MeshBasicMaterial>();
   private readonly gltfLoader = new GLTFLoader();
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private readonly frustumProbe = new THREE.Vector2();
   private readonly models = new Map<ModelKey, LoadedModel>();
   private readonly loadingModels = new Set<ModelKey>();
   private readonly failedModels = new Set<ModelKey>();
+  private sortedLaneCache: LaneState[] = [];
+  private objectsByZ = new Map<number, StagePlacedObject[]>();
+  private billboardCopyById = new Map<string, readonly [string, string]>();
+  private cacheRunId = -1;
   private cameraFocusX = 0;
   private cameraFocusZ = 6;
   private activeCameraPreset: CameraPresetId = DEFAULT_CAMERA_PRESET;
   private cameraZoomPercent = DEFAULT_CAMERA_ZOOM_PERCENT;
+  private appliedCameraZoomPercent = DEFAULT_CAMERA_ZOOM_PERCENT;
   private width = 1;
   private height = 1;
   private lastRunId = -1;
@@ -305,36 +359,52 @@ export class ThreeStageRenderer {
     const rect = this.container.getBoundingClientRect();
     this.width = Math.max(1, Math.floor(rect.width));
     this.height = Math.max(1, Math.floor(rect.height));
+    this.applyCameraProjection(this.appliedCameraZoomPercent);
+    this.renderer.setSize(this.width, this.height, false);
+  }
+
+  render(state: GameState, deltaSeconds: number, editSelection?: RenderEditSelection, options: RenderOptions = {}): void {
+    const player = getPlayerDisplayPosition(state);
+    const useStageCamera = options.useStageCamera ?? true;
+    const nextZoom = useStageCamera ? stageCameraZoomPercent(state) : this.cameraZoomPercent;
+    this.applyCameraProjection(nextZoom);
+    if (state.runId !== this.lastRunId) {
+      this.cameraFocusX = targetCameraFocusX(player.x, state, useStageCamera);
+      this.cameraFocusZ = targetCameraFocusZ(player.z, state, useStageCamera);
+      this.lastRunId = state.runId;
+    }
+    const alpha = 1 - Math.exp(-deltaSeconds / CAMERA_SPEC.smoothingSeconds);
+    this.cameraFocusX = lerp(this.cameraFocusX, targetCameraFocusX(player.x, state, useStageCamera), alpha);
+    this.cameraFocusZ = lerp(this.cameraFocusZ, targetCameraFocusZ(player.z, state, useStageCamera), alpha);
+    this.positionCamera();
+    this.prepareStageCaches(state);
+    const renderWindow = this.visibleRenderWindow();
+    this.rebuildWorld(state, editSelection, renderWindow);
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  private applyCameraProjection(percent: number): void {
+    const zoomPercent = clamp(percent, 90, 190);
+    this.appliedCameraZoomPercent = zoomPercent;
     const aspect = this.width / this.height;
     const preset = CAMERA_PRESETS[this.activeCameraPreset];
-    const orthoSize = (aspect < 0.82 ? preset.portraitOrthoSize : preset.orthoSize) * (100 / this.cameraZoomPercent);
+    const orthoSize = (aspect < 0.82 ? preset.portraitOrthoSize : preset.orthoSize) * (100 / zoomPercent);
     this.camera.left = -orthoSize * aspect;
     this.camera.right = orthoSize * aspect;
     this.camera.top = orthoSize;
     this.camera.bottom = -orthoSize;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(this.width, this.height, false);
-  }
-
-  render(state: GameState, deltaSeconds: number, editSelection?: RenderEditSelection): void {
-    const player = getPlayerDisplayPosition(state);
-    if (state.runId !== this.lastRunId) {
-      this.cameraFocusX = targetCameraFocusX(player.x);
-      this.cameraFocusZ = targetCameraFocusZ(player.z);
-      this.lastRunId = state.runId;
-    }
-    const alpha = 1 - Math.exp(-deltaSeconds / CAMERA_SPEC.smoothingSeconds);
-    this.cameraFocusX = lerp(this.cameraFocusX, targetCameraFocusX(player.x), alpha);
-    this.cameraFocusZ = lerp(this.cameraFocusZ, targetCameraFocusZ(player.z), alpha);
-    this.positionCamera();
-    this.rebuildWorld(state, editSelection);
-    this.renderer.render(this.scene, this.camera);
   }
 
   dispose(): void {
     this.renderer.dispose();
     this.boxGeometry.dispose();
+    this.planeGeometry.dispose();
     for (const material of this.materials.values()) material.dispose();
+    for (const material of this.billboardTextMaterials.values()) {
+      material.map?.dispose();
+      material.dispose();
+    }
     for (const model of this.models.values()) disposeModel(model.source);
   }
 
@@ -360,27 +430,59 @@ export class ThreeStageRenderer {
     this.camera.updateMatrixWorld();
   }
 
-  private rebuildWorld(state: GameState, editSelection?: RenderEditSelection): void {
+  private prepareStageCaches(state: GameState): void {
+    if (state.runId === this.cacheRunId) return;
+    this.sortedLaneCache = sortedLanes(state.lanes);
+    this.objectsByZ = indexObjectsByZ(state.stageObjects);
+    this.billboardCopyById = indexBillboardCopy(state.stageObjects);
+    this.cacheRunId = state.runId;
+  }
+
+  private visibleRenderWindow(): RenderWindow {
+    const zValues: number[] = [];
+    for (const [x, y] of [[-1, -1], [-1, 1], [1, -1], [1, 1], [0, -1], [0, 1]] as const) {
+      this.frustumProbe.set(x, y);
+      this.raycaster.setFromCamera(this.frustumProbe, this.camera);
+      const point = new THREE.Vector3();
+      if (this.raycaster.ray.intersectPlane(this.groundPlane, point)) zValues.push(point.z);
+    }
+    if (!zValues.length) return { minZ: Math.floor(this.cameraFocusZ) - 10, maxZ: Math.ceil(this.cameraFocusZ) + 10 };
+    return {
+      minZ: Math.floor(Math.min(...zValues)) - 4,
+      maxZ: Math.ceil(Math.max(...zValues)) + 4,
+    };
+  }
+
+  private rebuildWorld(state: GameState, editSelection: RenderEditSelection | undefined, renderWindow: RenderWindow): void {
     this.world.clear();
-    this.addBackdrop();
-    this.addDecorativeLowerWaterRows(state.time);
-    this.addDecorativeUpperExtensionRows(state.time, state.lanes);
-    for (const lane of sortedLanes(state.lanes)) {
+    this.addBackdrop(renderWindow);
+    this.addDecorativeLowerWaterRows(state.time, renderWindow);
+    this.addDecorativeUpperExtensionRows(state.time, state.lanes, renderWindow);
+    for (const lane of this.visibleLanes(renderWindow)) {
       this.addLane(lane);
-      this.addStaticObjects(lane, state);
+      this.addStaticObjects(lane, state, this.objectsByZ.get(lane.z) ?? []);
+      if (lane.kind === "train") this.addAutomaticTrainWarningAnchors(lane, state.time);
       this.addMovingObjects(lane, state);
     }
-    this.addPlayerAndTarget(state);
+    this.addPlayerAndTarget(state, renderWindow);
     if (editSelection) this.addEditSelection(editSelection);
   }
 
-  private addBackdrop(): void {
-    this.addBox(0, -0.18, 7.2, 20.8, 0.12, 21.6, PALETTE.grassBase, false);
+  private visibleLanes(renderWindow: RenderWindow): LaneState[] {
+    return this.sortedLaneCache.filter((lane) => lane.z >= renderWindow.minZ && lane.z <= renderWindow.maxZ);
+  }
+
+  private addBackdrop(renderWindow: RenderWindow): void {
+    const centerZ = (renderWindow.minZ + renderWindow.maxZ) / 2;
+    const depth = Math.max(8, renderWindow.maxZ - renderWindow.minZ + 4);
+    this.addBox(0, -0.18, centerZ, 20.8, 0.12, depth, PALETTE.grassBase, false);
   }
 
   private addLane(lane: LaneState): void {
     const laneColor = lane.kind === "river"
       ? lane.z % 2 === 0 ? PALETTE.riverBase : PALETTE.riverAlt
+      : lane.kind === "train"
+        ? PALETTE.trackBase
       : lane.kind === "road"
         ? lane.z % 2 === 0 ? PALETTE.roadBase : PALETTE.roadAlt
         : lane.terrain === "dirt"
@@ -397,6 +499,10 @@ export class ThreeStageRenderer {
       this.addWaterMarks(lane.z);
       return;
     }
+    if (lane.kind === "train") {
+      this.addTrainTrack(lane.z);
+      return;
+    }
     if (lane.terrain === "dirt") {
       this.addDirtMarks(lane.z);
     } else {
@@ -408,14 +514,17 @@ export class ThreeStageRenderer {
     }
   }
 
-  private addStaticObjects(lane: LaneState, state: GameState): void {
+  private addStaticObjects(lane: LaneState, state: GameState, objects: StagePlacedObject[]): void {
     if (lane.kind !== "grass") return;
-    for (const object of state.stageObjects) {
+    for (const object of objects) {
       if (object.z !== lane.z) continue;
       if (object.kind === "tree") this.addTree(object.x, object.z, object.assetId);
       if (object.kind === "building") this.addBuilding(object);
+      if (object.kind === "warning") this.addWarningSign(object.x, this.groundEdgePropZ(object, state), object.assetId, this.isWarningPropActive(object, state));
+      if (object.kind === "billboard") this.addBillboard(objectCenterX(object), object.z - 0.42, object.assetId, false, this.billboardCopyById.get(object.id));
       if (object.kind === "pancake" && !state.collectedPancakes.has(pancakeKey(object.x, object.z))) {
-        this.addPancake(object.x, object.z, object.assetId);
+        const escape = pancakeEscapeVisual(object.x, object.z, state);
+        if (escape !== null) this.addPancake(object.x, object.z, object.assetId, escape);
       }
     }
   }
@@ -426,10 +535,13 @@ export class ThreeStageRenderer {
         this.addLogPlatform(span.centerX, span.z, span.length);
         continue;
       }
+      if (span.kind === "train") {
+        this.addTrain(span.centerX, span.z, span.length, span.direction);
+        continue;
+      }
       const isTruck = span.length > 2.4;
       const height = isTruck ? 0.74 : 0.54;
-      const bodyColor = isTruck ? PALETTE.carYellow : span.color;
-      this.addBox(span.centerX, height / 2 + 0.08, span.z, span.length, height, 0.72, bodyColor, true);
+      this.addBox(span.centerX, height / 2 + 0.08, span.z, span.length, height, 0.72, span.color, true);
       this.addBox(span.centerX + span.direction * span.length * 0.18, height + 0.19, span.z, span.length * 0.42, 0.28, 0.52, 0xdff6ff, true);
       const wheelOffset = Math.min(span.length / 2 - 0.25, 1.22);
       for (const sideZ of [-0.42, 0.42]) {
@@ -439,12 +551,13 @@ export class ThreeStageRenderer {
     }
   }
 
-  private addDecorativeLowerWaterRows(time: number): void {
+  private addDecorativeLowerWaterRows(time: number, renderWindow: RenderWindow): void {
     for (const z of [-2, -1]) {
+      if (z < renderWindow.minZ || z > renderWindow.maxZ) continue;
       this.addBox(0, -0.055, z, 17.4, 0.1, 0.98, z % 2 === 0 ? PALETTE.riverAlt : PALETTE.riverBase, false);
       this.addWaterMarks(z);
       const direction = z === -1 ? 1 : -1;
-      const speed = z === -1 ? 1.1 : 0.8;
+      const speed = (z === -1 ? 1.1 : 0.8) * DECORATIVE_LOG_SPEED_MULTIPLIER;
       const length = z === -1 ? 3.1 : 4.2;
       const gap = z === -1 ? 5.8 : 6.8;
       const phase = stableLanePhase(z, direction);
@@ -460,21 +573,23 @@ export class ThreeStageRenderer {
     }
   }
 
-  private addDecorativeUpperExtensionRows(time: number, lanes: Map<number, LaneState>): void {
+  private addDecorativeUpperExtensionRows(time: number, lanes: Map<number, LaneState>, renderWindow: RenderWindow): void {
     const topZ = Math.max(...lanes.keys());
     for (let offset = 1; offset <= 3; offset += 1) {
       const z = topZ + offset;
+      if (z < renderWindow.minZ || z > renderWindow.maxZ) continue;
       this.addBox(0, -0.055, z, 17.4, 0.1, 0.98, z % 2 === 0 ? PALETTE.riverBase : PALETTE.riverAlt, false);
       this.addWaterMarks(z);
       const direction = offset % 2 === 0 ? -1 : 1;
       const length = offset === 3 ? 4.4 : offset === 2 ? 1.85 : 3;
-      const speed = offset === 2 ? 1.8 : 1.25;
+      const speed = (offset === 2 ? 1.8 : 1.25) * DECORATIVE_LOG_SPEED_MULTIPLIER;
       const gap = offset === 2 ? 4.6 : 6.5;
       this.addDecorativeMovingLogs(z, time, direction, speed, length, gap);
     }
 
     for (let offset = 4; offset <= 6; offset += 1) {
       const z = topZ + offset;
+      if (z < renderWindow.minZ || z > renderWindow.maxZ) continue;
       this.addBox(0, -0.05, z, 17.4, 0.1, 0.98, z % 2 === 0 ? PALETTE.roadBase : PALETTE.roadAlt, false);
       for (let x = -8; x <= 8; x += 2) {
         this.addBox(x, 0.015, z, 0.74, 0.025, 0.05, PALETTE.roadMarking, false);
@@ -539,24 +654,183 @@ export class ThreeStageRenderer {
     }
   }
 
+  private addTrainTrack(z: number): void {
+    this.addBox(0, 0.018, z - 0.22, 17.8, 0.035, 0.055, PALETTE.railMetal, false);
+    this.addBox(0, 0.018, z + 0.22, 17.8, 0.035, 0.055, PALETTE.railMetal, false);
+    for (let x = -8.4; x <= 8.4; x += 0.72) {
+      this.addBox(x, 0.012, z, 0.12, 0.032, 0.66, PALETTE.railTie, false);
+    }
+  }
+
+  private addTrain(x: number, z: number, length: number, direction: -1 | 1): void {
+    const cars = Math.max(2, Math.round(length / 1.5));
+    const carLength = length / cars;
+    for (let index = 0; index < cars; index += 1) {
+      const offset = (index - (cars - 1) / 2) * carLength;
+      const carX = x + offset;
+      const isEngine = direction === 1 ? index === cars - 1 : index === 0;
+      this.addBox(carX, 0.42, z, carLength * 0.92, 0.68, 0.62, isEngine ? PALETTE.trainBody : 0x303945, true);
+      this.addBox(carX, 0.66, z - 0.33, carLength * 0.62, 0.12, 0.045, PALETTE.trainStripe, true);
+      this.addBox(carX + direction * carLength * 0.18, 0.73, z, carLength * 0.28, 0.18, 0.5, 0xd8eef5, true);
+      this.addBox(carX - carLength * 0.28, 0.12, z - 0.28, 0.18, 0.14, 0.12, PALETTE.playerDark, true);
+      this.addBox(carX + carLength * 0.28, 0.12, z + 0.28, 0.18, 0.14, 0.12, PALETTE.playerDark, true);
+    }
+  }
+
   private addLogPlatform(x: number, z: number, length: number): void {
     this.addBox(x, 0.13, z, length, 0.26, 0.62, PALETTE.logBase, true);
     this.addBox(x - length * 0.35, 0.22, z, 0.12, 0.1, 0.66, PALETTE.logAlt, true);
     this.addBox(x + length * 0.35, 0.22, z, 0.12, 0.1, 0.66, PALETTE.logAlt, true);
   }
 
-  private addPlayerAndTarget(state: GameState): void {
+  private addWarningSign(x: number, z: number, assetId: StageAssetId | undefined, active: boolean): void {
+    const flash = active && Math.floor(performance.now() / 160) % 2 === 0;
+    const primary = flash ? PALETTE.warningRed : PALETTE.warningYellow;
+    const height = assetId === "warningSign02" ? 0.8 : 0.64;
+    this.addBox(x, height / 2, z, 0.08, height, 0.08, PALETTE.billboardPost, true);
+    this.addBox(x, height + 0.16, z, 0.58, 0.36, 0.08, primary, true);
+    this.addBox(x, height + 0.16, z - 0.055, 0.42, 0.06, 0.028, PALETTE.playerDark, true);
+    this.addBox(x, height + 0.06, z - 0.055, 0.42, 0.06, 0.028, PALETTE.playerDark, true);
+  }
+
+  private addAutomaticTrainWarningAnchors(lane: LaneState, time: number): void {
+    const active = isTrainWarningActive(lane, time);
+    const flash = active && Math.floor(performance.now() / 145) % 2 === 0;
+    const signalColor = flash ? PALETTE.warningRed : active ? PALETTE.warningYellow : 0xd8b760;
+    const postColor = active ? PALETTE.billboardPost : 0x7b6858;
+    for (const x of [GRID.visibleMinX + 0.72, GRID.visibleMaxX - 0.72]) {
+      this.addBox(x, 0.36, lane.z, 0.12, 0.72, 0.12, postColor, true);
+      this.addBox(x, 0.82, lane.z - 0.08, 0.46, 0.16, 0.08, signalColor, true);
+      this.addBox(x, 1.04, lane.z - 0.08, 0.46, 0.16, 0.08, signalColor, true);
+      this.addBox(x, 1.21, lane.z - 0.08, 0.64, 0.08, 0.06, PALETTE.railMetal, true);
+    }
+  }
+
+  private addBillboard(x: number, z: number, assetId: StageAssetId | undefined, foreground = false, copy: readonly [string, string] = BILLBOARD_COPY[0]): void {
+    const wide = assetId === "billboard02";
+    const width = wide ? 3.35 : 2.6;
+    const height = wide ? 1.28 : 1.02;
+    const postHeight = wide ? 1.42 : 1.18;
+    const faceY = wide ? 1.22 : 1.06;
+    const faceZ = z - 0.22;
+    const postOffset = width * 0.38;
+    this.addBox(x, 0.04, z + 0.1, width * 0.82, 0.04, 0.34, 0x5a4638, false, foreground ? 0 : 0.18, foreground);
+    this.addBox(x - postOffset, postHeight / 2, z + 0.04, 0.12, postHeight, 0.1, PALETTE.billboardPost, !foreground, 1, foreground);
+    this.addBox(x + postOffset, postHeight / 2, z + 0.04, 0.12, postHeight, 0.1, PALETTE.billboardPost, !foreground, 1, foreground);
+    this.addBox(x, faceY, faceZ, width, height, 0.12, PALETTE.billboardFace, !foreground, 1, foreground);
+    this.addBox(x, faceY + height * 0.43, faceZ - 0.07, width * 0.94, 0.075, 0.04, PALETTE.billboardFrame, !foreground, 1, foreground);
+    this.addBox(x, faceY - height * 0.43, faceZ - 0.07, width * 0.94, 0.075, 0.04, PALETTE.billboardFrame, !foreground, 1, foreground);
+    this.addBox(x - width * 0.47, faceY, faceZ - 0.07, 0.075, height * 0.84, 0.04, PALETTE.billboardFrame, !foreground, 1, foreground);
+    this.addBox(x + width * 0.47, faceY, faceZ - 0.07, 0.075, height * 0.84, 0.04, PALETTE.billboardFrame, !foreground, 1, foreground);
+    this.addBox(x - width * 0.24, faceY + height * 0.25, faceZ - 0.09, width * 0.34, 0.06, 0.035, PALETTE.billboardAccent, !foreground, 1, foreground);
+    this.addBillboardTextPanel(x, faceY, faceZ - 0.095, width * 0.82, height * 0.7, assetId, foreground, copy);
+  }
+
+  private addBillboardTextPanel(x: number, y: number, z: number, width: number, height: number, assetId: StageAssetId | undefined, foreground: boolean, copy: readonly [string, string]): void {
+    const material = this.billboardTextMaterial(assetId === "billboard02" ? "billboard02" : "billboard01", foreground, copy);
+    const mesh = new THREE.Mesh(this.planeGeometry, material);
+    mesh.position.set(x, y - height * 0.02, z);
+    mesh.rotation.y = Math.PI;
+    mesh.scale.set(width, height, 1);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    if (foreground) mesh.renderOrder = 30;
+    this.world.add(mesh);
+  }
+
+  private billboardTextMaterial(assetId: "billboard01" | "billboard02", foreground: boolean, copy: readonly [string, string]): THREE.MeshBasicMaterial {
+    const key = `${assetId}:${foreground ? "foreground" : "world"}:${copy.join("/")}`;
+    const cached = this.billboardTextMaterials.get(key);
+    if (cached) return cached;
+    const texture = new THREE.CanvasTexture(createBillboardCanvas(assetId, copy));
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      side: THREE.FrontSide,
+      transparent: false,
+      toneMapped: false,
+      depthTest: !foreground,
+      depthWrite: !foreground,
+    });
+    this.billboardTextMaterials.set(key, material);
+    return material;
+  }
+
+  private addBillboardForegroundPass(player: GridPoint, renderWindow: RenderWindow): void {
+    for (let z = renderWindow.minZ; z <= renderWindow.maxZ; z += 1) {
+      for (const object of this.objectsByZ.get(z) ?? []) {
+        if (object.kind !== "billboard" || !shouldBillboardOverlayPlayer(object, player)) continue;
+        this.addBillboard(objectCenterX(object), object.z - 0.42, object.assetId, true, this.billboardCopyById.get(object.id));
+      }
+    }
+  }
+
+  private isWarningPropActive(object: StagePlacedObject, state: GameState): boolean {
+    if (object.kind !== "warning") return false;
+    for (const lane of state.lanes.values()) {
+      if (lane.kind === "train" && Math.abs(lane.z - object.z) <= 1 && isTrainWarningActive(lane, state.time)) return true;
+    }
+    return false;
+  }
+
+  private groundEdgePropZ(object: StagePlacedObject, state: GameState): number {
+    let nearestTrainZ: number | undefined;
+    for (const lane of state.lanes.values()) {
+      if (lane.kind !== "train" || Math.abs(lane.z - object.z) > 1) continue;
+      if (nearestTrainZ === undefined || Math.abs(lane.z - object.z) < Math.abs(nearestTrainZ - object.z)) nearestTrainZ = lane.z;
+    }
+    if (nearestTrainZ !== undefined) return (object.z + nearestTrainZ) / 2;
+    return object.z - 0.42;
+  }
+
+  private addPlayerAndTarget(state: GameState, renderWindow: RenderWindow): void {
     const player = getPlayerDisplayPosition(state);
     if (!this.addMrAwesomePlayer(player.x, player.y, player.z)) {
       this.addPrimitiveHero(player.x, 0.08 + player.y, player.z, state.phase === "crashed");
     }
 
-    if (state.stage.target.visible) {
+    if (state.stage.target.visible && state.stage.target.z >= renderWindow.minZ && state.stage.target.z <= renderWindow.maxZ) {
       const target = state.stage.target;
-      if (!this.addMrNotSoAwesomeTarget(target.x, target.z)) {
-        this.addPrimitiveTarget(target.x, target.z);
+      const visual = finalTargetVisual(state);
+      if (visual) {
+        if (!this.addMrNotSoAwesomeTarget(target.x, target.z, visual)) {
+          this.addPrimitiveTarget(target.x, target.z, visual);
+        }
+      }
+    } else if (state.stage.targetEscape && state.stage.targetEscape.z >= renderWindow.minZ && state.stage.targetEscape.z <= renderWindow.maxZ) {
+      const escape = escapeVisual(state.stage.targetEscape.startedAt, state.time);
+      if (escape) {
+        const target = state.stage.targetEscape;
+        if (!this.addMrNotSoAwesomeTarget(target.x, target.z, escape)) {
+          this.addPrimitiveTarget(target.x, target.z, escape);
+        }
       }
     }
+    this.addFinalRescueEffects(state, renderWindow);
+    this.addBillboardForegroundPass(player, renderWindow);
+  }
+
+  private addFinalRescueEffects(state: GameState, renderWindow: RenderWindow): void {
+    if (state.stage.mode !== "finalSequence" || state.stage.finalRescueStartedAt === undefined) return;
+    const elapsed = state.time - state.stage.finalRescueStartedAt;
+    if (elapsed < 0 || elapsed > 3.2) return;
+    const baseZ = state.stage.target.z - 0.8;
+    if (baseZ < renderWindow.minZ || baseZ > renderWindow.maxZ) return;
+    const progress = clamp(elapsed / 1.2, 0, 1);
+    const pop = Math.sin(progress * Math.PI);
+    const opacity = clamp(1 - Math.max(0, elapsed - 2.2), 0, 1);
+    const baseX = (state.player.x + state.stage.target.x) / 2;
+    const offsets = [-0.86, 0, 0.86];
+    offsets.forEach((offset, index) => {
+      const x = baseX + offset;
+      const z = baseZ + (index - 1) * 0.22;
+      const y = 0.42 + pop * 0.34 + index * 0.05;
+      this.addBox(x, y, z, 0.34, 0.34, 0.28, index === 1 ? PALETTE.playerRed : PALETTE.pancakeBase, true, opacity, true);
+      this.addBox(x, y + 0.28, z - 0.03, 0.24, 0.18, 0.2, index === 1 ? PALETTE.playerYellow : PALETTE.butterColor, true, opacity, true);
+      this.addBox(x + 0.28, y + 0.55 + pop * 0.08, z - 0.08, 0.08, 0.08, 0.04, PALETTE.butterColor, false, opacity, true);
+      this.addBox(x - 0.26, y + 0.5 + pop * 0.1, z + 0.06, 0.07, 0.07, 0.04, PALETTE.warningYellow, false, opacity, true);
+    });
   }
 
   private addPrimitiveHero(x: number, y: number, z: number, crashed: boolean): void {
@@ -570,13 +844,13 @@ export class ThreeStageRenderer {
     this.addBox(x + 0.16, y + 0.04, visualZ + 0.12, 0.13, 0.17, 0.13, PALETTE.playerYellow, true);
   }
 
-  private addPrimitiveTarget(x: number, z: number): void {
-    const visualZ = z + CHARACTER_LANE_CENTER_Z_OFFSET;
+  private addPrimitiveTarget(x: number, z: number, visual: EscapeVisual = defaultEscapeVisual()): void {
+    const visualZ = z + CHARACTER_LANE_CENTER_Z_OFFSET + visual.zOffset;
     const targetY = MR_NOT_SO_AWESOME_HEIGHT_SCALE;
-    this.addBox(x, 0.38 * targetY, visualZ, 0.5, 0.74 * targetY, 0.42, PALETTE.villainBody, true);
-    this.addBox(x, 0.88 * targetY, visualZ - 0.04, 0.42, 0.34 * targetY, 0.36, PALETTE.villainEye, true);
-    this.addBox(x - 0.24, 0.92 * targetY, visualZ - 0.02, 0.12, 0.18 * targetY, 0.14, PALETTE.villainDark, true);
-    this.addBox(x + 0.24, 0.92 * targetY, visualZ - 0.02, 0.12, 0.18 * targetY, 0.14, PALETTE.villainDark, true);
+    this.addBox(x, visual.yOffset + 0.38 * targetY * visual.scale, visualZ, 0.5 * visual.scale, 0.74 * targetY * visual.scale, 0.42 * visual.scale, PALETTE.villainBody, true, visual.opacity);
+    this.addBox(x, visual.yOffset + 0.88 * targetY * visual.scale, visualZ - 0.04, 0.42 * visual.scale, 0.34 * targetY * visual.scale, 0.36 * visual.scale, PALETTE.villainEye, true, visual.opacity);
+    this.addBox(x - 0.24 * visual.scale, visual.yOffset + 0.92 * targetY * visual.scale, visualZ - 0.02, 0.12 * visual.scale, 0.18 * targetY * visual.scale, 0.14 * visual.scale, PALETTE.villainDark, true, visual.opacity);
+    this.addBox(x + 0.24 * visual.scale, visual.yOffset + 0.92 * targetY * visual.scale, visualZ - 0.02, 0.12 * visual.scale, 0.18 * targetY * visual.scale, 0.14 * visual.scale, PALETTE.villainDark, true, visual.opacity);
   }
 
   private addTree(x: number, z: number, assetId?: StageAssetId): void {
@@ -612,16 +886,16 @@ export class ThreeStageRenderer {
     this.addBox(x + 0.18, 0.78, z - visualDepth / 2 - 0.02, 0.24, 0.32, 0.04, PALETTE.windowColor, true);
   }
 
-  private addPancake(x: number, z: number, assetId?: StageAssetId): void {
-    const visualZ = z + PANCAKE_LANE_CENTER_Z_OFFSET;
+  private addPancake(x: number, z: number, assetId?: StageAssetId, visual: EscapeVisual = defaultEscapeVisual()): void {
+    const visualZ = z + PANCAKE_LANE_CENTER_Z_OFFSET + visual.zOffset;
     if (!assetId || assetId === "pancake") {
-      if (this.addTexturedPancake(x, z)) return;
+      if (this.addTexturedPancake(x, z, visual)) return;
     } else if (assetId in ASSET_PATHS && this.addAssetModel(assetId as ModelKey, x, 0.025, visualZ, { width: 0.62, height: 0.28, depth: 0.62 }, Math.PI * stableQuarterTurn(x, z) / 2)) {
       return;
     }
-    this.addBox(x, 0.11, visualZ, 0.58, 0.08, 0.58, PALETTE.pancakeAlt, true);
-    this.addBox(x, 0.18, visualZ, 0.5, 0.06, 0.5, PALETTE.pancakeBase, true);
-    this.addBox(x + 0.1, 0.23, visualZ - 0.06, 0.16, 0.04, 0.12, PALETTE.butterColor, true);
+    this.addBox(x, visual.yOffset + 0.11 * visual.scale, visualZ, 0.58 * visual.scale, 0.08 * visual.scale, 0.58 * visual.scale, PALETTE.pancakeAlt, true, visual.opacity);
+    this.addBox(x, visual.yOffset + 0.18 * visual.scale, visualZ, 0.5 * visual.scale, 0.06 * visual.scale, 0.5 * visual.scale, PALETTE.pancakeBase, true, visual.opacity);
+    this.addBox(x + 0.1 * visual.scale, visual.yOffset + 0.23 * visual.scale, visualZ - 0.06 * visual.scale, 0.16 * visual.scale, 0.04 * visual.scale, 0.12 * visual.scale, PALETTE.butterColor, true, visual.opacity);
   }
 
   private addEditSelection(selection: RenderEditSelection): void {
@@ -649,7 +923,7 @@ export class ThreeStageRenderer {
     return true;
   }
 
-  private addMrNotSoAwesomeTarget(x: number, z: number): boolean {
+  private addMrNotSoAwesomeTarget(x: number, z: number, visual: EscapeVisual = defaultEscapeVisual()): boolean {
     const targetModel = this.models.get("target");
     const playerModel = this.models.get("player");
     if (!targetModel || !playerModel) {
@@ -660,37 +934,39 @@ export class ThreeStageRenderer {
 
     const clone = targetModel.source.clone(true);
     const scale = MR_AWESOME_PLAYER_SCALE;
+    if (visual.opacity < 1) setObjectOpacity(clone, visual.opacity);
     const equalizer = new THREE.Vector3(
       (playerModel.size.x * MR_AWESOME_PLAYER_SCALE) / Math.max(0.001, targetModel.size.x * scale),
       (playerModel.size.y * MR_AWESOME_PLAYER_SCALE) / Math.max(0.001, targetModel.size.y * scale),
       (playerModel.size.z * MR_AWESOME_PLAYER_SCALE) / Math.max(0.001, targetModel.size.z * scale),
     );
     clone.name = "mr_not_so_awesome_target";
-    clone.position.set(x, 0.025, z + CHARACTER_LANE_CENTER_Z_OFFSET);
+    clone.position.set(x, 0.025 + visual.yOffset, z + CHARACTER_LANE_CENTER_Z_OFFSET + visual.zOffset);
     clone.rotation.y = Math.PI;
     clone.scale.set(
-      scale * CHARACTER_WIDTH_SCALE * equalizer.x,
-      scale * MR_NOT_SO_AWESOME_HEIGHT_SCALE * equalizer.y,
-      scale * equalizer.z,
+      scale * CHARACTER_WIDTH_SCALE * equalizer.x * visual.scale,
+      scale * MR_NOT_SO_AWESOME_HEIGHT_SCALE * equalizer.y * visual.scale,
+      scale * equalizer.z * visual.scale,
     );
     this.world.add(clone);
     return true;
   }
 
-  private addTexturedPancake(x: number, z: number): boolean {
+  private addTexturedPancake(x: number, z: number, visual: EscapeVisual = defaultEscapeVisual()): boolean {
     const model = this.models.get("pancake");
     if (!model) {
       this.loadModel("pancake");
       return false;
     }
     const clone = model.source.clone(true);
+    if (visual.opacity < 1) setObjectOpacity(clone, visual.opacity);
     clone.name = "textured_pancake_collectible";
-    clone.position.set(x, 0.025, z + PANCAKE_LANE_CENTER_Z_OFFSET);
+    clone.position.set(x, 0.025 + visual.yOffset, z + PANCAKE_LANE_CENTER_Z_OFFSET + visual.zOffset);
     clone.rotation.y = Math.PI * stableQuarterTurn(x, z) / 2;
     clone.scale.set(
-      PANCAKE_MODEL_SCALE_XZ,
-      PANCAKE_MODEL_SCALE_Y,
-      PANCAKE_MODEL_SCALE_XZ,
+      PANCAKE_MODEL_SCALE_XZ * visual.scale,
+      PANCAKE_MODEL_SCALE_Y * visual.scale,
+      PANCAKE_MODEL_SCALE_XZ * visual.scale,
     );
     this.world.add(clone);
     return true;
@@ -718,17 +994,18 @@ export class ThreeStageRenderer {
     return true;
   }
 
-  private addBox(x: number, y: number, z: number, width: number, height: number, depth: number, color: number, castShadow: boolean, opacity = 1): void {
-    const mesh = new THREE.Mesh(this.boxGeometry, this.material(color, opacity));
+  private addBox(x: number, y: number, z: number, width: number, height: number, depth: number, color: number, castShadow: boolean, opacity = 1, foreground = false): void {
+    const mesh = new THREE.Mesh(this.boxGeometry, this.material(color, opacity, foreground));
     mesh.position.set(x, y, z);
     mesh.scale.set(width, height, depth);
-    mesh.castShadow = castShadow;
-    mesh.receiveShadow = true;
+    mesh.castShadow = castShadow && !foreground;
+    mesh.receiveShadow = !foreground;
+    if (foreground) mesh.renderOrder = 30;
     this.world.add(mesh);
   }
 
-  private material(color: number, opacity: number): THREE.Material {
-    const key = `${color.toString(16)}:${opacity.toFixed(2)}`;
+  private material(color: number, opacity: number, foreground = false): THREE.Material {
+    const key = `${color.toString(16)}:${opacity.toFixed(2)}:${foreground ? "foreground" : "world"}`;
     const cached = this.materials.get(key);
     if (cached) return cached;
     const material = new THREE.MeshStandardMaterial({
@@ -737,6 +1014,8 @@ export class ThreeStageRenderer {
       metalness: 0,
       transparent: opacity < 1,
       opacity,
+      depthTest: !foreground,
+      depthWrite: !foreground,
     });
     this.materials.set(key, material);
     return material;
@@ -746,10 +1025,6 @@ export class ThreeStageRenderer {
     this.loadModel("player");
     this.loadModel("target");
     this.loadModel("pancake");
-    this.loadModel("house01");
-    this.loadModel("house02");
-    this.loadModel("tree03");
-    this.loadModel("tree05");
   }
 
   private loadModel(key: ModelKey): void {
@@ -825,12 +1100,74 @@ function sortedLanes(lanes: Map<number, LaneState>): LaneState[] {
   return Array.from(lanes.values()).sort((a, b) => a.z - b.z);
 }
 
-function targetCameraFocusX(playerX: number): number {
+function indexObjectsByZ(objects: StagePlacedObject[]): Map<number, StagePlacedObject[]> {
+  const indexed = new Map<number, StagePlacedObject[]>();
+  for (const object of objects) {
+    const existing = indexed.get(object.z);
+    if (existing) existing.push(object);
+    else indexed.set(object.z, [object]);
+  }
+  return indexed;
+}
+
+function targetCameraFocusX(playerX: number, state: GameState, useStageCamera: boolean): number {
+  if (useStageCamera && (state.stage.mode === "summoning" || state.stage.mode === "finalSequence") && state.stage.target.visible) {
+    return clamp(((playerX + state.stage.target.x) / 2) * CAMERA_SPEC.sideFollowRatio, -CAMERA_SPEC.sideFollowClamp, CAMERA_SPEC.sideFollowClamp);
+  }
   return clamp(playerX * CAMERA_SPEC.sideFollowRatio, -CAMERA_SPEC.sideFollowClamp, CAMERA_SPEC.sideFollowClamp);
 }
 
-function targetCameraFocusZ(playerZ: number): number {
-  return Math.max(2, playerZ) + CAMERA_SPEC.targetAheadRows - CAMERA_SPEC.foregroundPadding;
+function targetCameraFocusZ(playerZ: number, state: GameState, useStageCamera: boolean): number {
+  const laneMaxZ = Math.max(...state.lanes.keys());
+  const topStopPlayerZ = Math.max(CAMERA_SPEC.bottomAnchorPlayerZ, laneMaxZ - CAMERA_SPEC.topBoundaryLeadRows);
+  if (useStageCamera && state.stage.mode === "introPancakes") return rawCameraFocusZ(CAMERA_SPEC.bottomAnchorPlayerZ);
+  if (useStageCamera && state.stage.mode === "summoning" && state.stage.target.visible) {
+    return introRevealCameraFocusZ(state, topStopPlayerZ);
+  }
+  if (useStageCamera && state.stage.mode === "finalSequence" && state.stage.target.visible) {
+    const framedZ = (playerZ + state.stage.target.z) / 2 - 0.6;
+    return rawCameraFocusZ(clamp(framedZ, CAMERA_SPEC.bottomAnchorPlayerZ, topStopPlayerZ));
+  }
+  if (useStageCamera && state.stage.mode === "chase" && !state.stage.introCameraHandoffDone) {
+    const introFocus = introRevealCameraFocusZ(state, topStopPlayerZ);
+    if (state.stage.introCameraHandoffStartedAt !== undefined && state.stage.introCameraHandoffReleaseAt !== undefined) {
+      const chaseFocus = chaseCameraFocusZ(playerZ, topStopPlayerZ);
+      const tweenStart = state.stage.introCameraHandoffStartedAt + ESCAPE_POP_SECONDS;
+      const tweenDuration = Math.max(0.001, state.stage.introCameraHandoffReleaseAt - tweenStart);
+      const progress = clamp((state.time - tweenStart) / tweenDuration, 0, 1);
+      return lerp(introFocus, chaseFocus, easeInOutCubic(progress));
+    }
+    return introFocus;
+  }
+  return chaseCameraFocusZ(playerZ, topStopPlayerZ);
+}
+
+function stageCameraZoomPercent(state: GameState): number {
+  if (state.stage.mode === "finalSequence") return 138;
+  if (state.stage.mode === "introPancakes" || state.stage.mode === "summoning") return REVEAL_CAMERA_ZOOM_PERCENT;
+  if (state.stage.mode === "chase" && !state.stage.introCameraHandoffDone) {
+    if (state.stage.introCameraHandoffStartedAt !== undefined && state.stage.introCameraHandoffReleaseAt !== undefined) {
+      const tweenStart = state.stage.introCameraHandoffStartedAt + ESCAPE_POP_SECONDS;
+      const tweenDuration = Math.max(0.001, state.stage.introCameraHandoffReleaseAt - tweenStart);
+      const progress = clamp((state.time - tweenStart) / tweenDuration, 0, 1);
+      return lerp(REVEAL_CAMERA_ZOOM_PERCENT, CHASE_CAMERA_ZOOM_PERCENT, easeInOutCubic(progress));
+    }
+    return REVEAL_CAMERA_ZOOM_PERCENT;
+  }
+  return CHASE_CAMERA_ZOOM_PERCENT;
+}
+
+function rawCameraFocusZ(playerZ: number): number {
+  return Math.max(CAMERA_SPEC.bottomAnchorPlayerZ, playerZ) + CAMERA_SPEC.targetAheadRows - CAMERA_SPEC.foregroundPadding;
+}
+
+function introRevealCameraFocusZ(state: GameState, topStopPlayerZ: number): number {
+  const framedPlayerZ = (state.stage.playerStart.z + state.stage.summonMarker.z) / 2 - 1.5;
+  return rawCameraFocusZ(clamp(framedPlayerZ, CAMERA_SPEC.bottomAnchorPlayerZ, topStopPlayerZ));
+}
+
+function chaseCameraFocusZ(playerZ: number, topStopPlayerZ: number): number {
+  return rawCameraFocusZ(clamp(playerZ + CHASE_CAMERA_AHEAD_OFFSET_ROWS, CAMERA_SPEC.bottomAnchorPlayerZ, topStopPlayerZ));
 }
 
 function stableQuarterTurn(x: number, z: number): number {
@@ -846,8 +1183,153 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * clamp(t, 0, 1);
 }
 
+function easeInOutCubic(value: number): number {
+  const t = clamp(value, 0, 1);
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function objectCenterX(object: StagePlacedObject): number {
+  if (!object.cells.length) return object.x;
+  const minX = Math.min(...object.cells.map((cell) => cell.x));
+  const maxX = Math.max(...object.cells.map((cell) => cell.x));
+  return (minX + maxX) / 2;
+}
+
+function indexBillboardCopy(objects: StagePlacedObject[]): Map<string, readonly [string, string]> {
+  const indexed = new Map<string, readonly [string, string]>();
+  const billboards = objects
+    .filter((object) => object.kind === "billboard")
+    .sort((a, b) => a.z - b.z || objectCenterX(a) - objectCenterX(b) || a.id.localeCompare(b.id));
+  billboards.forEach((object, index) => indexed.set(object.id, BILLBOARD_COPY[index % BILLBOARD_COPY.length]));
+  return indexed;
+}
+
+function shouldBillboardOverlayPlayer(object: StagePlacedObject, player: GridPoint): boolean {
+  if (!object.cells.length) return false;
+  const minX = Math.min(...object.cells.map((cell) => cell.x)) - 0.35;
+  const maxX = Math.max(...object.cells.map((cell) => cell.x)) + 0.35;
+  const inHorizontalCover = player.x >= minX && player.x <= maxX;
+  const inVerticalCover = player.z >= object.z - 0.25 && player.z <= object.z + 0.35;
+  return inHorizontalCover && inVerticalCover;
+}
+
+function defaultEscapeVisual(): EscapeVisual {
+  return { yOffset: 0, zOffset: 0, scale: 1, opacity: 1 };
+}
+
+function finalTargetVisual(state: GameState): EscapeVisual | null {
+  if (state.stage.mode !== "finalSequence") return defaultEscapeVisual();
+  if (state.stage.finalPoofStartedAt !== undefined && state.time >= state.stage.finalPoofStartedAt) {
+    return escapeVisual(state.stage.finalPoofStartedAt, state.time, 0.23);
+  }
+  const startedAt = state.stage.finalStartedAt ?? state.time;
+  const surpriseSeconds = Math.max(0, state.time - startedAt);
+  const shake = surpriseSeconds < 1.2 ? Math.sin(surpriseSeconds * 48) * 0.035 : 0;
+  return { ...defaultEscapeVisual(), zOffset: shake, scale: 1 + (surpriseSeconds < 0.5 ? Math.sin(surpriseSeconds * Math.PI * 4) * 0.035 : 0) };
+}
+
+function pancakeEscapeVisual(x: number, z: number, state: GameState): EscapeVisual | null {
+  const key = pancakeKey(x, z);
+  if (!state.stage.stolenPancakes.has(key)) return defaultEscapeVisual();
+  const startedAt = state.stage.stolenPancakesStartedAt;
+  if (startedAt === undefined || state.time <= startedAt) return defaultEscapeVisual();
+  return escapeVisual(startedAt, state.time, x * 0.017 + z * 0.011);
+}
+
+function escapeVisual(startedAt: number, time: number, driftSeed = 0): EscapeVisual | null {
+  const progress = clamp((time - startedAt) / ESCAPE_POP_SECONDS, 0, 1);
+  if (progress >= 1) return null;
+  const lift = easeOutCubic(progress);
+  const shrink = easeInCubic(progress);
+  const pop = Math.sin(progress * Math.PI);
+  const endFade = progress < 0.82 ? 1 : 1 - (progress - 0.82) / 0.18;
+  return {
+    yOffset: 0.08 * pop + 0.78 * lift,
+    zOffset: -0.16 * lift + Math.sin(driftSeed * 91.7) * 0.04 * pop,
+    scale: Math.max(0.08, 1 + 0.16 * pop - 0.92 * shrink),
+    opacity: clamp(endFade, 0, 1),
+  };
+}
+
+function easeOutCubic(value: number): number {
+  const inverted = 1 - value;
+  return 1 - inverted * inverted * inverted;
+}
+
+function easeInCubic(value: number): number {
+  return value * value * value;
+}
+
+function setObjectOpacity(object: THREE.Object3D, opacity: number): void {
+  object.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    if (Array.isArray(child.material)) {
+      child.material = child.material.map((material) => transparentMaterial(material, opacity));
+    } else {
+      child.material = transparentMaterial(child.material, opacity);
+    }
+  });
+}
+
+function transparentMaterial(material: THREE.Material, opacity: number): THREE.Material {
+  const clone = material.clone();
+  clone.transparent = opacity < 1;
+  clone.opacity = opacity;
+  clone.depthWrite = opacity >= 0.98;
+  return clone;
+}
+
+function createBillboardCanvas(assetId: "billboard01" | "billboard02", copy: readonly [string, string]): HTMLCanvasElement {
+  const wide = assetId === "billboard02";
+  const canvas = document.createElement("canvas");
+  canvas.width = wide ? 1024 : 768;
+  canvas.height = wide ? 448 : 320;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+
+  const ink = "#263338";
+  const brown = "#523d2f";
+  const paper = "#fff5cf";
+  ctx.fillStyle = paper;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#d8464a";
+  ctx.fillRect(wide ? 68 : 54, wide ? 52 : 42, wide ? 260 : 190, wide ? 18 : 14);
+
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "center";
+  ctx.lineJoin = "round";
+  drawFittedText(ctx, copy[0], brown, 900, wide ? 74 : 56, wide ? 40 : 32, canvas.width / 2, wide ? 156 : 112, canvas.width * 0.86);
+  drawFittedText(ctx, copy[1], ink, 900, wide ? 136 : 96, wide ? 56 : 46, canvas.width / 2, wide ? 310 : 230, canvas.width * 0.86);
+
+  ctx.fillStyle = "rgba(82, 61, 47, 0.14)";
+  ctx.fillRect(canvas.width * 0.16, canvas.height - (wide ? 52 : 38), canvas.width * 0.68, wide ? 12 : 9);
+  return canvas;
+}
+
+function drawFittedText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  color: string,
+  weight: number,
+  startSize: number,
+  minSize: number,
+  x: number,
+  y: number,
+  maxWidth: number,
+): void {
+  let size = startSize;
+  while (size > minSize) {
+    ctx.font = `${weight} ${size}px Nunito, Arial, sans-serif`;
+    if (ctx.measureText(text).width <= maxWidth) break;
+    size -= 2;
+  }
+  ctx.font = `${weight} ${size}px Nunito, Arial, sans-serif`;
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y, maxWidth);
 }
 
 function enhanceLoadedAssetMaterials(key: ModelKey, source: THREE.Object3D): void {

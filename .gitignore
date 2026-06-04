@@ -4,3 +4,4 @@ dist/
 
 # Large reference/source lab. The current game keeps only the needed runtime assets in public/.
 crossy-road-lab/
+.vercel
