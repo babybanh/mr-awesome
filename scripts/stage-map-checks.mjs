@@ -840,6 +840,17 @@ try {
       && panel.eventType === "VILLAIN_REVEAL"
       && panel.text === "Thanks for the pancakes. I trapped your friends too!";
   });
+  check("post-reveal first chase keeps a dialogue prompt visible", () => {
+    let state = simulation.createInitialState(introFivePancakeTown, 0, 0);
+    for (let index = 0; index < 5; index += 1) state = moveAndSettle(simulation, state);
+    for (let index = 0; index < 270; index += 1) state = simulation.tickGame(state, 0.05, { hazardsEnabled: false });
+    const director = new dialogue.DialogueDirector();
+    const panel = director.update(undefined, state, { editMode: false, cheatMode: false });
+    return state.stage.mode === "chase"
+      && state.stage.catchCount === 0
+      && panel.speaker === "B"
+      && panel.text === "Come catch me, hero.";
+  });
   check("first catch handoff dialogue happens once", () => {
     const state = simulation.createInitialState(introFivePancakeTown, 0, 0);
     const staged = {
