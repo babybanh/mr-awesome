@@ -24,10 +24,8 @@ export class VillainAvatarRenderer {
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 20);
   private readonly renderer: THREE.WebGLRenderer;
   private readonly loader = new GLTFLoader();
-  private readonly modelCache = new Map<string, Promise<THREE.Object3D>>();
   private readonly resizeObserver: ResizeObserver;
   private model?: THREE.Object3D;
-  private modelId = "";
   private disposed = false;
   private loadToken = 0;
   private zoomPercent = 100;
@@ -58,12 +56,6 @@ export class VillainAvatarRenderer {
     this.render();
   }
 
-  preload(modelDefinitions: readonly AvatarModelDefinition[]): void {
-    for (const modelDefinition of modelDefinitions) {
-      void this.getModelTemplate(modelDefinition).catch(() => undefined);
-    }
-  }
-
   dispose(): void {
     this.disposed = true;
     this.resizeObserver.disconnect();
@@ -84,59 +76,40 @@ export class VillainAvatarRenderer {
   }
 
   setModel(modelDefinition: AvatarModelDefinition): void {
-    if (modelDefinition.id === this.modelId) return;
     const token = ++this.loadToken;
-    const hasCurrentModel = Boolean(this.model);
-    this.container.classList.toggle("is-loaded", hasCurrentModel);
-    this.container.classList.remove("is-fallback");
+    this.container.classList.remove("is-loaded", "is-fallback");
+    if (this.model) {
+      this.portraitRoot.remove(this.model);
+      disposeObject(this.model);
+      this.model = undefined;
+    }
     this.loadModel(modelDefinition, token);
     this.scheduleRender();
   }
 
   private loadModel(modelDefinition: AvatarModelDefinition, token: number): void {
-    this.getModelTemplate(modelDefinition)
-      .then((template) => {
+    this.loader.load(
+      modelDefinition.path,
+      (gltf) => {
         if (this.disposed || token !== this.loadToken) {
+          disposeObject(gltf.scene);
           return;
         }
-        const model = cloneAvatarModel(template);
+        const model = gltf.scene;
         model.name = `${modelDefinition.id}_avatar`;
-        const previousModel = this.model;
-        if (previousModel) this.portraitRoot.remove(previousModel);
+        if (modelDefinition.id === "mr-not-so-awesome") enhanceMrNotSoAwesomeMaterials(model);
         this.model = model;
-        this.modelId = modelDefinition.id;
+        normalizeHeadPortraitModel(model);
         this.portraitRoot.add(model);
-        if (previousModel) disposeObject(previousModel);
         this.applyVerticalFrame();
         this.container.classList.add("is-loaded");
         this.render();
-      })
-      .catch(() => {
-        if (!this.disposed && token === this.loadToken && !this.model) this.container.classList.add("is-fallback");
-      });
-  }
-
-  private getModelTemplate(modelDefinition: AvatarModelDefinition): Promise<THREE.Object3D> {
-    const cached = this.modelCache.get(modelDefinition.id);
-    if (cached) return cached;
-    const loadPromise = new Promise<THREE.Object3D>((resolve, reject) => {
-      this.loader.load(
-        modelDefinition.path,
-        (gltf) => {
-          const model = gltf.scene;
-          if (modelDefinition.id === "mr-not-so-awesome") enhanceMrNotSoAwesomeMaterials(model);
-          normalizeHeadPortraitModel(model);
-          resolve(model);
-        },
-        undefined,
-        (error) => reject(error),
-      );
-    }).catch((error) => {
-      this.modelCache.delete(modelDefinition.id);
-      throw error;
-    });
-    this.modelCache.set(modelDefinition.id, loadPromise);
-    return loadPromise;
+      },
+      undefined,
+      () => {
+        if (!this.disposed && token === this.loadToken) this.container.classList.add("is-fallback");
+      },
+    );
   }
 
   private render(): void {
@@ -184,18 +157,6 @@ function normalizeHeadPortraitModel(model: THREE.Object3D): void {
   model.rotation.y = Math.PI;
   const scale = MODEL_TARGET_HEIGHT / Math.max(0.001, size.y);
   model.scale.setScalar(scale);
-}
-
-function cloneAvatarModel(template: THREE.Object3D): THREE.Object3D {
-  const clone = template.clone(true);
-  clone.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    child.geometry = child.geometry.clone();
-    child.material = Array.isArray(child.material)
-      ? child.material.map((material) => material.clone())
-      : child.material.clone();
-  });
-  return clone;
 }
 
 function clamp(value: number, min: number, max: number): number {

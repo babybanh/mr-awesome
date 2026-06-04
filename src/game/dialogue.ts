@@ -579,12 +579,6 @@ export class DialogueDirector {
       return panelFromLine(line("B", FIRST_CATCH_LINES[0], 95, "FIRST_CATCH_HANDOFF", 2.6, "instruction"), state.time + 0.3);
     }
 
-    const firstChasePanel = firstChasePromptPanel(state);
-    if (firstChasePanel) {
-      this.active = undefined;
-      return firstChasePanel;
-    }
-
     const eventLine = this.eventLine(previous, state);
     if (eventLine) this.activate(eventLine, state.time);
 
@@ -904,14 +898,6 @@ function isFirstCatchHandoff(state: GameState): boolean {
     && !state.stage.introCameraHandoffDone
     && state.stage.introCameraHandoffStartedAt !== undefined
     && state.stage.introCameraHandoffReleaseAt !== undefined;
-}
-
-function firstChasePromptPanel(state: GameState): DialoguePanel | undefined {
-  if (state.stage.mode !== "chase") return undefined;
-  if (state.stage.catchCount !== 0 || state.stage.introCameraHandoffDone) return undefined;
-  if (state.stage.summonStartedAt === undefined || !state.stage.target.visible) return undefined;
-  if (state.phase !== "running") return undefined;
-  return fixedPanel("B", "Come catch me, hero.", "instruction", "DEFAULT");
 }
 
 function openingTutorialPanel(state: GameState): DialoguePanel | undefined {
