@@ -284,6 +284,8 @@ export class ThreeStageRenderer {
   private readonly camera = new THREE.OrthographicCamera(-8, 8, 8, -8, 0.1, 80);
   private readonly renderer: THREE.WebGLRenderer;
   private readonly world = new THREE.Group();
+  private readonly staticWorld = new THREE.Group();
+  private readonly dynamicWorld = new THREE.Group();
   private readonly boxGeometry = new THREE.BoxGeometry(1, 1, 1);
   private readonly planeGeometry = new THREE.PlaneGeometry(1, 1);
   private readonly materials = new Map<string, THREE.Material>();
@@ -296,6 +298,9 @@ export class ThreeStageRenderer {
   private readonly models = new Map<ModelKey, LoadedModel>();
   private readonly loadingModels = new Set<ModelKey>();
   private readonly failedModels = new Set<ModelKey>();
+  private readonly mobileRenderer = isCoarsePointer();
+  private activeWorld: THREE.Group = this.dynamicWorld;
+  private staticWorldKey = "";
   private sortedLaneCache: LaneState[] = [];
   private objectsByZ = new Map<number, StagePlacedObject[]>();
   private billboardCopyById = new Map<string, readonly [string, string]>();
@@ -316,12 +321,12 @@ export class ThreeStageRenderer {
       powerPreference: "high-performance",
       preserveDrawingBuffer: true,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.mobileRenderer ? 1.35 : 2));
     this.renderer.setClearColor(PALETTE.background);
     this.renderer.toneMapping = THREE.NoToneMapping;
     this.renderer.toneMappingExposure = 1;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = !this.mobileRenderer;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.container.appendChild(this.renderer.domElement);
 
@@ -330,8 +335,8 @@ export class ThreeStageRenderer {
     const fillLight = new THREE.DirectionalLight(0xfff0d2, 0.35);
     const rimLight = new THREE.DirectionalLight(0xc8e6ff, 0.18);
     sunLight.position.set(-5, 14, -6);
-    sunLight.castShadow = true;
-    sunLight.shadow.mapSize.set(1024, 1024);
+    sunLight.castShadow = !this.mobileRenderer;
+    sunLight.shadow.mapSize.set(this.mobileRenderer ? 512 : 1024, this.mobileRenderer ? 512 : 1024);
     sunLight.shadow.radius = 3.1;
     sunLight.shadow.camera.left = -16;
     sunLight.shadow.camera.right = 16;
@@ -340,6 +345,7 @@ export class ThreeStageRenderer {
     fillLight.position.set(5, 7, 6);
     rimLight.position.set(4, 5, -8);
     this.scene.fog = null;
+    this.world.add(this.staticWorld, this.dynamicWorld);
     this.scene.add(this.world, hemiLight, sunLight, fillLight, rimLight);
     this.resize();
     this.loadInitialAssets();
@@ -454,18 +460,49 @@ export class ThreeStageRenderer {
   }
 
   private rebuildWorld(state: GameState, editSelection: RenderEditSelection | undefined, renderWindow: RenderWindow): void {
-    this.world.clear();
-    this.addBackdrop(renderWindow);
-    this.addDecorativeLowerWaterRows(state.time, renderWindow);
-    this.addDecorativeUpperExtensionRows(state.time, state.lanes, renderWindow);
-    for (const lane of this.visibleLanes(renderWindow)) {
-      this.addLane(lane);
-      this.addStaticObjects(lane, state, this.objectsByZ.get(lane.z) ?? []);
-      if (lane.kind === "train") this.addAutomaticTrainWarningAnchors(lane, state.time);
-      this.addMovingObjects(lane, state);
+    const visibleLanes = this.visibleLanes(renderWindow);
+    const staticWorldKey = this.staticLayerKey(state, renderWindow);
+    if (staticWorldKey !== this.staticWorldKey) {
+      this.staticWorld.clear();
+      this.withActiveWorld(this.staticWorld, () => {
+        this.addBackdrop(renderWindow);
+        for (const lane of visibleLanes) {
+          this.addLane(lane);
+          this.addStaticObjects(lane, this.objectsByZ.get(lane.z) ?? []);
+        }
+      });
+      this.staticWorldKey = staticWorldKey;
     }
-    this.addPlayerAndTarget(state, renderWindow);
-    if (editSelection) this.addEditSelection(editSelection);
+
+    this.dynamicWorld.clear();
+    this.withActiveWorld(this.dynamicWorld, () => {
+      this.addDecorativeLowerWaterRows(state.time, renderWindow);
+      this.addDecorativeUpperExtensionRows(state.time, state.lanes, renderWindow);
+      for (const lane of visibleLanes) {
+        this.addDynamicObjects(lane, state, this.objectsByZ.get(lane.z) ?? []);
+        if (lane.kind === "train") this.addAutomaticTrainWarningAnchors(lane, state.time);
+        this.addMovingObjects(lane, state);
+      }
+      this.addPlayerAndTarget(state, renderWindow);
+      if (editSelection) this.addEditSelection(editSelection);
+    });
+  }
+
+  private staticLayerKey(state: GameState, renderWindow: RenderWindow): string {
+    return [
+      state.runId,
+      renderWindow.minZ,
+      renderWindow.maxZ,
+      this.models.size,
+      this.failedModels.size,
+    ].join(":");
+  }
+
+  private withActiveWorld(world: THREE.Group, render: () => void): void {
+    const previousWorld = this.activeWorld;
+    this.activeWorld = world;
+    render();
+    this.activeWorld = previousWorld;
   }
 
   private visibleLanes(renderWindow: RenderWindow): LaneState[] {
@@ -514,14 +551,21 @@ export class ThreeStageRenderer {
     }
   }
 
-  private addStaticObjects(lane: LaneState, state: GameState, objects: StagePlacedObject[]): void {
+  private addStaticObjects(lane: LaneState, objects: StagePlacedObject[]): void {
     if (lane.kind !== "grass") return;
     for (const object of objects) {
       if (object.z !== lane.z) continue;
       if (object.kind === "tree") this.addTree(object.x, object.z, object.assetId);
       if (object.kind === "building") this.addBuilding(object);
-      if (object.kind === "warning") this.addWarningSign(object.x, this.groundEdgePropZ(object, state), object.assetId, this.isWarningPropActive(object, state));
       if (object.kind === "billboard") this.addBillboard(objectCenterX(object), object.z - 0.42, object.assetId, false, this.billboardCopyById.get(object.id));
+    }
+  }
+
+  private addDynamicObjects(lane: LaneState, state: GameState, objects: StagePlacedObject[]): void {
+    if (lane.kind !== "grass") return;
+    for (const object of objects) {
+      if (object.z !== lane.z) continue;
+      if (object.kind === "warning") this.addWarningSign(object.x, this.groundEdgePropZ(object, state), object.assetId, this.isWarningPropActive(object, state));
       if (object.kind === "pancake" && !state.collectedPancakes.has(pancakeKey(object.x, object.z))) {
         const escape = pancakeEscapeVisual(object.x, object.z, state);
         if (escape !== null) this.addPancake(object.x, object.z, object.assetId, escape);
@@ -735,7 +779,7 @@ export class ThreeStageRenderer {
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     if (foreground) mesh.renderOrder = 30;
-    this.world.add(mesh);
+    this.activeWorld.add(mesh);
   }
 
   private billboardTextMaterial(assetId: "billboard01" | "billboard02", foreground: boolean, copy: readonly [string, string]): THREE.MeshBasicMaterial {
@@ -919,7 +963,7 @@ export class ThreeStageRenderer {
       MR_AWESOME_PLAYER_SCALE,
       MR_AWESOME_PLAYER_SCALE,
     );
-    this.world.add(clone);
+    this.activeWorld.add(clone);
     return true;
   }
 
@@ -948,7 +992,7 @@ export class ThreeStageRenderer {
       scale * MR_NOT_SO_AWESOME_HEIGHT_SCALE * equalizer.y * visual.scale,
       scale * equalizer.z * visual.scale,
     );
-    this.world.add(clone);
+    this.activeWorld.add(clone);
     return true;
   }
 
@@ -968,7 +1012,7 @@ export class ThreeStageRenderer {
       PANCAKE_MODEL_SCALE_Y * visual.scale,
       PANCAKE_MODEL_SCALE_XZ * visual.scale,
     );
-    this.world.add(clone);
+    this.activeWorld.add(clone);
     return true;
   }
 
@@ -990,7 +1034,7 @@ export class ThreeStageRenderer {
       bounds.depth / Math.max(0.001, model.size.z),
     );
     group.add(clone);
-    this.world.add(group);
+    this.activeWorld.add(group);
     return true;
   }
 
@@ -1001,7 +1045,7 @@ export class ThreeStageRenderer {
     mesh.castShadow = castShadow && !foreground;
     mesh.receiveShadow = !foreground;
     if (foreground) mesh.renderOrder = 30;
-    this.world.add(mesh);
+    this.activeWorld.add(mesh);
   }
 
   private material(color: number, opacity: number, foreground = false): THREE.Material {
@@ -1066,8 +1110,8 @@ export class ThreeStageRenderer {
     enhanceLoadedAssetMaterials(key, source);
     source.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
-      object.castShadow = true;
-      object.receiveShadow = true;
+      object.castShadow = !this.mobileRenderer;
+      object.receiveShadow = !this.mobileRenderer;
     });
     source.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(source);
@@ -1078,11 +1122,13 @@ export class ThreeStageRenderer {
       size: box.getSize(new THREE.Vector3()),
     });
     this.loadingModels.delete(key);
+    this.staticWorldKey = "";
   }
 
   private markModelFailed(key: ModelKey, error: unknown): void {
     this.loadingModels.delete(key);
     this.failedModels.add(key);
+    this.staticWorldKey = "";
     console.warn(`Could not load ${String(key)} model; using primitive fallback.`, error);
   }
 
@@ -1358,9 +1404,8 @@ function enhanceMaterialForAsset(key: "target" | "pancake", material: THREE.Mate
     else colorMaterial.color.offsetHSL(0, 0.08, 0.07);
   }
   if (colorMaterial.emissive) {
-    const glow = key === "pancake" ? new THREE.Color(0xff9f2d) : new THREE.Color(0xcfd7e8);
-    colorMaterial.emissive.copy(glow);
-    colorMaterial.emissiveIntensity = key === "pancake" ? 0.18 : 0.1;
+    colorMaterial.emissive.set(0x000000);
+    colorMaterial.emissiveIntensity = 0;
   }
   if (typeof colorMaterial.roughness === "number") {
     colorMaterial.roughness = key === "pancake" ? Math.min(colorMaterial.roughness, 0.62) : Math.min(colorMaterial.roughness, 0.7);
@@ -1376,4 +1421,8 @@ function disposeModel(model: THREE.Object3D | undefined): void {
     const materials = Array.isArray(object.material) ? object.material : [object.material];
     for (const material of materials) material.dispose();
   });
+}
+
+function isCoarsePointer(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse), (hover: none)").matches;
 }

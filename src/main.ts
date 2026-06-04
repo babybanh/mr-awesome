@@ -18,6 +18,7 @@ const AVATAR_FRAMING_STORAGE_KEY = "awesome-superhero.avatar-framing.v1";
 const AVATAR_BACKGROUND_STORAGE_KEY = "awesome-superhero.avatar-background.v2";
 const MUSIC_ENABLED_STORAGE_KEY = "awesome-superhero.music-enabled.v1";
 const BUILD_ID = "2026-06-02-stage1-first-pass";
+const EDITOR_ENABLED = isLocalEditorUrl();
 const CREDITS_CONFIG = {
   studentName: "Adam",
   studentVideoUrl: "https://youtu.be/IJtiQkQ0VVA?si=8ISjm8fkp9JLNmDm",
@@ -222,6 +223,7 @@ sfx.setEnabled(musicEnabled);
 elements.stageMap.value = state.stageMap;
 populateCredits();
 populateCameraControls();
+configureEditorAvailability();
 updateMusicToggle();
 bindButtons();
 bindKeyboard();
@@ -277,6 +279,26 @@ function applyCreditLink(anchor: HTMLAnchorElement, url: string | undefined): vo
   anchor.rel = "noopener noreferrer";
 }
 
+function configureEditorAvailability(): void {
+  document.body.dataset.editorEnabled = String(EDITOR_ENABLED);
+  composition.dataset.editorEnabled = String(EDITOR_ENABLED);
+  if (EDITOR_ENABLED) {
+    elements.mapDrawer.removeAttribute("aria-hidden");
+    elements.mapDrawer.removeAttribute("inert");
+    return;
+  }
+
+  editMode = false;
+  debugControlsVisible = false;
+  elements.bottomActions.hidden = true;
+  elements.statusStrip.hidden = true;
+  elements.mapDrawer.setAttribute("aria-hidden", "true");
+  elements.mapDrawer.setAttribute("inert", "");
+  elements.mapDrawer.remove();
+  elements.laneHover.remove();
+  elements.gameplayZoomGuide.remove();
+}
+
 function openCreditsModal(): void {
   elements.creditsModal.hidden = false;
   composition.classList.add("is-credits-open");
@@ -291,6 +313,7 @@ function closeCreditsModal(): void {
 
 function bindButtons(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
+    if (!EDITOR_ENABLED && button.closest(".bottom-actions")) return;
     button.addEventListener("click", () => {
       unlockMusic();
       const action = button.dataset.action as GameAction | undefined;
@@ -315,12 +338,14 @@ function bindButtons(): void {
     });
   });
 
-  document.querySelectorAll<HTMLButtonElement>("[data-toggle-map]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const hidden = elements.mapDrawer.hasAttribute("hidden");
-      elements.mapDrawer.toggleAttribute("hidden", !hidden);
+  if (EDITOR_ENABLED) {
+    document.querySelectorAll<HTMLButtonElement>("[data-toggle-map]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const hidden = elements.mapDrawer.hasAttribute("hidden");
+        elements.mapDrawer.toggleAttribute("hidden", !hidden);
+      });
     });
-  });
+  }
 
   elements.creditsOpen.addEventListener("click", openCreditsModal);
 
@@ -340,6 +365,8 @@ function bindButtons(): void {
     syncMusicNow();
     updateMusicToggle();
   });
+
+  if (!EDITOR_ENABLED) return;
 
   requireElement<HTMLButtonElement>("[data-stage-apply]").addEventListener("click", () => {
     applyMapText(elements.stageMap.value, true, { preservePlayer: editMode });
@@ -780,7 +807,7 @@ function bindKeyboard(): void {
       closeCreditsModal();
       return;
     }
-    if (event.key === "Tab" && !isTypingTarget(event.target)) {
+    if (EDITOR_ENABLED && event.key === "Tab" && !isTypingTarget(event.target)) {
       event.preventDefault();
       debugControlsVisible = !debugControlsVisible;
       updateUi();
@@ -797,13 +824,13 @@ function bindKeyboard(): void {
       updateUi();
       return;
     }
-    if (editMode && handleEditKey(event)) return;
+    if (EDITOR_ENABLED && editMode && handleEditKey(event)) return;
     const mapped = keyMap.get(event.key);
     if (!mapped) return;
     event.preventDefault();
     if (mapped !== "toggleMap" && handleOpeningTutorialStart()) return;
     if (mapped === "toggleMap") {
-      elements.mapDrawer.toggleAttribute("hidden");
+      if (EDITOR_ENABLED) elements.mapDrawer.toggleAttribute("hidden");
       return;
     }
     state = applyAction(state, mapped, { allowMoveFromTerminal: editMode || cheatMode, cheatMode });
@@ -815,7 +842,7 @@ function bindKeyboard(): void {
 function bindPointer(): void {
   gameView.addEventListener("pointerdown", (event) => {
     unlockMusic();
-    if (editMode) {
+    if (EDITOR_ENABLED && editMode) {
       const tile = renderer.getTileFromPointer(event);
       const stage = parseStageMap(state.stageMap).stage;
       const object = tile && stage ? objectAt(stage, tile) : undefined;
@@ -841,7 +868,7 @@ function bindPointer(): void {
   });
 
   gameView.addEventListener("pointermove", (event) => {
-    if (!editMode) return;
+    if (!EDITOR_ENABLED || !editMode) return;
     const tile = renderer.getTileFromPointer(event);
     hoveredTile = tile;
     if (tile && dragStart) {
@@ -854,7 +881,7 @@ function bindPointer(): void {
   });
 
   gameView.addEventListener("pointerup", (event) => {
-    if (editMode && dragStart) {
+    if (EDITOR_ENABLED && editMode && dragStart) {
       const tile = renderer.getTileFromPointer(event);
       const stage = parseStageMap(state.stageMap).stage;
       if (tile && stage) {
@@ -1032,8 +1059,8 @@ function updateOpeningTutorialVisuals(): void {
   composition.classList.toggle("is-opening-tutorial-idle", active && !openingTutorialAnimating && state.time >= 3);
   composition.classList.toggle("is-opening-tutorial-exiting", active && openingTutorialAnimating);
   composition.classList.toggle("is-debug-controls-visible", debugControlsVisible);
-  elements.statusStrip.hidden = !debugControlsVisible;
-  elements.bottomActions.hidden = !debugControlsVisible;
+  elements.statusStrip.hidden = !EDITOR_ENABLED || !debugControlsVisible;
+  elements.bottomActions.hidden = !EDITOR_ENABLED || !debugControlsVisible;
 }
 
 function shouldShowOpeningTutorial(): boolean {
@@ -1282,6 +1309,11 @@ function requireElement<T extends HTMLElement = HTMLElement>(selector: string): 
   const element = document.querySelector<T>(selector);
   if (!element) throw new Error(`Missing required DOM element: ${selector}`);
   return element;
+}
+
+function isLocalEditorUrl(): boolean {
+  const host = window.location.hostname;
+  return (host === "localhost" || host === "127.0.0.1" || host === "::1") && new URLSearchParams(window.location.search).get("editor") === "1";
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
