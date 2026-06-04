@@ -17,7 +17,6 @@ const AVATAR_CHARACTER_STORAGE_KEY = "awesome-superhero.avatar-character.v2";
 const AVATAR_FRAMING_STORAGE_KEY = "awesome-superhero.avatar-framing.v1";
 const AVATAR_BACKGROUND_STORAGE_KEY = "awesome-superhero.avatar-background.v2";
 const MUSIC_ENABLED_STORAGE_KEY = "awesome-superhero.music-enabled.v1";
-const EDITOR_ENABLED = new URLSearchParams(window.location.search).get("editor") === "1";
 const BUILD_ID = "2026-06-02-stage1-first-pass";
 const CREDITS_CONFIG = {
   studentName: "Adam",
@@ -128,7 +127,7 @@ const sfx = new SfxManager();
 const resizeObserver = new ResizeObserver(() => renderer.resize());
 resizeObserver.observe(gameView);
 
-let state = createInitialState(EDITOR_ENABLED ? readStoredStageMap() : baselineStageMap());
+let state = createInitialState(readStoredStageMap());
 let editMode = false;
 let cheatMode = false;
 let editSelection: RenderEditSelection | undefined;
@@ -167,35 +166,8 @@ let lastDialogueKey = "";
 let musicEnabled = readStoredMusicEnabled();
 let openingTutorialDismissed = false;
 let openingTutorialAnimating = false;
-let debugControlsVisible = EDITOR_ENABLED;
+let debugControlsVisible = false;
 let observedRunId = state.runId;
-let editorElements: EditorElements | undefined;
-
-interface EditorElements {
-  mapDrawer: HTMLElement;
-  mapStatus: HTMLElement;
-  stageMap: HTMLTextAreaElement;
-  validation: HTMLTextAreaElement;
-  editToggle: HTMLButtonElement;
-  cameraPanel: HTMLElement;
-  avatarCharacter: HTMLSelectElement;
-  avatarBackground: HTMLSelectElement;
-  cameraPreset: HTMLSelectElement;
-  cameraZoom: HTMLInputElement;
-  laneHover: HTMLElement;
-  laneHoverCode: HTMLElement;
-  laneHoverText: HTMLTextAreaElement;
-  laneHoverCopy: HTMLButtonElement;
-  laneHoverEdit: HTMLButtonElement;
-  laneHoverApply: HTMLButtonElement;
-  laneHoverCancel: HTMLButtonElement;
-  avatarDrag: HTMLButtonElement;
-  controlStyle: HTMLSelectElement;
-  backgroundTheme: HTMLSelectElement;
-  borderStyle: HTMLSelectElement;
-  dialoguePanel: HTMLSelectElement;
-  gameplayZoomGuide: HTMLElement;
-}
 
 const elements = {
   dialogueStrip: requireElement<HTMLElement>(".dialogue-strip"),
@@ -207,6 +179,29 @@ const elements = {
   message: requireElement("[data-message]"),
   clearOverlay: requireElement("#stage-clear"),
   crashOverlay: requireElement("#crash-overlay"),
+  mapDrawer: requireElement("#map-drawer"),
+  mapStatus: requireElement("[data-map-status]"),
+  stageMap: requireElement<HTMLTextAreaElement>("[data-stage-map]"),
+  validation: requireElement<HTMLTextAreaElement>("[data-stage-validation]"),
+  editToggle: requireElement<HTMLButtonElement>("[data-edit-toggle]"),
+  cameraPanel: requireElement("[data-edit-camera-panel]"),
+  avatarCharacter: requireElement<HTMLSelectElement>("[data-avatar-character]"),
+  avatarBackground: requireElement<HTMLSelectElement>("[data-avatar-background]"),
+  cameraPreset: requireElement<HTMLSelectElement>("[data-camera-preset]"),
+  cameraZoom: requireElement<HTMLInputElement>("[data-camera-zoom]"),
+  laneHover: requireElement<HTMLElement>("[data-lane-hover]"),
+  laneHoverCode: requireElement<HTMLElement>("[data-lane-hover-code]"),
+  laneHoverText: requireElement<HTMLTextAreaElement>("[data-lane-hover-text]"),
+  laneHoverCopy: requireElement<HTMLButtonElement>("[data-lane-hover-copy]"),
+  laneHoverEdit: requireElement<HTMLButtonElement>("[data-lane-hover-edit]"),
+  laneHoverApply: requireElement<HTMLButtonElement>("[data-lane-hover-apply]"),
+  laneHoverCancel: requireElement<HTMLButtonElement>("[data-lane-hover-cancel]"),
+  avatarDrag: requireElement<HTMLButtonElement>("[data-avatar-drag]"),
+  controlStyle: requireElement<HTMLSelectElement>("[data-control-style]"),
+  backgroundTheme: requireElement<HTMLSelectElement>("[data-background-theme]"),
+  borderStyle: requireElement<HTMLSelectElement>("[data-border-style]"),
+  dialoguePanel: requireElement<HTMLSelectElement>("[data-dialogue-panel]"),
+  gameplayZoomGuide: requireElement("[data-gameplay-zoom-guide]"),
   creditsOpen: requireElement<HTMLButtonElement>("[data-credits-open]"),
   creditsClose: requireElement<HTMLButtonElement>("[data-credits-close]"),
   creditsModal: requireElement<HTMLElement>("[data-credits-modal]"),
@@ -221,103 +216,41 @@ const elements = {
   creditDeveloperUrl: requireElement<HTMLAnchorElement>("[data-credit-developer-url]"),
   musicToggle: requireElement<HTMLButtonElement>("[data-music-toggle]"),
 };
-function editor(): EditorElements {
-  if (!editorElements) throw new Error("Editor tools are not enabled.");
-  return editorElements;
-}
 
-function requireEditorElements(): EditorElements {
-  return {
-    mapDrawer: requireElement("#map-drawer"),
-    mapStatus: requireElement("[data-map-status]"),
-    stageMap: requireElement<HTMLTextAreaElement>("[data-stage-map]"),
-    validation: requireElement<HTMLTextAreaElement>("[data-stage-validation]"),
-    editToggle: requireElement<HTMLButtonElement>("[data-edit-toggle]"),
-    cameraPanel: requireElement("[data-edit-camera-panel]"),
-    avatarCharacter: requireElement<HTMLSelectElement>("[data-avatar-character]"),
-    avatarBackground: requireElement<HTMLSelectElement>("[data-avatar-background]"),
-    cameraPreset: requireElement<HTMLSelectElement>("[data-camera-preset]"),
-    cameraZoom: requireElement<HTMLInputElement>("[data-camera-zoom]"),
-    laneHover: requireElement<HTMLElement>("[data-lane-hover]"),
-    laneHoverCode: requireElement<HTMLElement>("[data-lane-hover-code]"),
-    laneHoverText: requireElement<HTMLTextAreaElement>("[data-lane-hover-text]"),
-    laneHoverCopy: requireElement<HTMLButtonElement>("[data-lane-hover-copy]"),
-    laneHoverEdit: requireElement<HTMLButtonElement>("[data-lane-hover-edit]"),
-    laneHoverApply: requireElement<HTMLButtonElement>("[data-lane-hover-apply]"),
-    laneHoverCancel: requireElement<HTMLButtonElement>("[data-lane-hover-cancel]"),
-    avatarDrag: requireElement<HTMLButtonElement>("[data-avatar-drag]"),
-    controlStyle: requireElement<HTMLSelectElement>("[data-control-style]"),
-    backgroundTheme: requireElement<HTMLSelectElement>("[data-background-theme]"),
-    borderStyle: requireElement<HTMLSelectElement>("[data-border-style]"),
-    dialoguePanel: requireElement<HTMLSelectElement>("[data-dialogue-panel]"),
-    gameplayZoomGuide: requireElement("[data-gameplay-zoom-guide]"),
-  };
-}
+music.setEnabled(musicEnabled);
+sfx.setEnabled(musicEnabled);
+elements.stageMap.value = state.stageMap;
+populateCredits();
+populateCameraControls();
+updateMusicToggle();
+bindButtons();
+bindKeyboard();
+bindPointer();
+updateUi();
+requestAnimationFrame(frame);
 
-bootEditorAndStart();
-
-function bootEditorAndStart(): void {
-  if (!EDITOR_ENABLED) {
-    startGame();
-    return;
-  }
-
-  void import("./editor/editorMarkup")
-    .then(({ mountEditorMarkup }) => {
-      mountEditorMarkup(gameBoard);
-      startGame();
-    })
-    .catch((error: unknown) => {
-      console.error("Editor tools failed to load.", error);
-      startGame();
-    });
-}
-
-function startGame(): void {
-  editorElements = EDITOR_ENABLED && document.querySelector("#map-drawer") ? requireEditorElements() : undefined;
-  music.setEnabled(musicEnabled);
-  sfx.setEnabled(musicEnabled);
-  populateCredits();
-  if (editorElements) {
-    editorElements.stageMap.value = state.stageMap;
-    showEditorControls();
-    populateCameraControls();
-  } else {
-    removeEditorControls();
-    applyStoredPresentationSettings();
-  }
-  updateMusicToggle();
-  bindButtons();
-  bindKeyboard();
-  bindPointer();
-  updateUi();
-  requestAnimationFrame(frame);
-
-  window.addEventListener("beforeunload", () => {
-    resizeObserver.disconnect();
-    music.dispose();
-    sfx.dispose();
-    renderer.dispose();
-    villainAvatar.dispose();
-  });
-}
+window.addEventListener("beforeunload", () => {
+  resizeObserver.disconnect();
+  music.dispose();
+  sfx.dispose();
+  renderer.dispose();
+  villainAvatar.dispose();
+});
 
 function frame(now: number): void {
   const deltaSeconds = Math.min(0.05, (now - previousTime) / 1000);
   previousTime = now;
   const previousState = state;
-  const editorActive = EDITOR_ENABLED && editMode;
-  const cheatActive = EDITOR_ENABLED && cheatMode;
-  state = tickGame(state, deltaSeconds, { hazardsEnabled: !editorActive && !cheatActive, stageCompletionEnabled: !editorActive, cheatMode: cheatActive });
+  state = tickGame(state, deltaSeconds, { hazardsEnabled: !editMode && !cheatMode, stageCompletionEnabled: !editMode, cheatMode });
   if (state.runId !== observedRunId) {
     observedRunId = state.runId;
     resetOpeningTutorial();
     previousDialogueState = undefined;
     lastDialogueKey = "";
   }
-  sfx.sync(previousState, state, { cheatMode: cheatActive });
-  music.sync(state, { cheatMode: cheatActive });
-  renderer.render(state, deltaSeconds, editorActive ? editSelection : undefined, { useStageCamera: !editorActive });
+  sfx.sync(previousState, state, { cheatMode });
+  music.sync(state, { cheatMode });
+  renderer.render(state, deltaSeconds, editSelection, { useStageCamera: !editMode });
   updateUi();
   requestAnimationFrame(frame);
 }
@@ -356,29 +289,6 @@ function closeCreditsModal(): void {
   elements.creditsOpen.focus();
 }
 
-function showEditorControls(): void {
-  document.querySelectorAll<HTMLElement>("[data-toggle-map]").forEach((button) => {
-    button.hidden = false;
-  });
-}
-
-function removeEditorControls(): void {
-  document.querySelectorAll<HTMLElement>("#map-drawer, [data-toggle-map], [data-gameplay-zoom-guide], [data-lane-hover]").forEach((element) => {
-    element.remove();
-  });
-}
-
-function applyStoredPresentationSettings(): void {
-  composition.dataset.controlTheme = readControlStyle();
-  document.body.dataset.pageBackgroundTheme = readBackgroundTheme();
-  composition.dataset.borderStyle = readBorderStyle();
-  composition.dataset.dialoguePanel = readDialoguePanel();
-  avatarBox.dataset.avatarBackground = readAvatarBackground();
-  elements.speaker.textContent = avatarOptionById(avatarCharacterId).label;
-  avatarBox.querySelector("span")?.replaceChildren(document.createTextNode(avatarCharacterId === "mr-awesome" ? "A" : "N"));
-  updateAvatarFraming();
-}
-
 function bindButtons(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -386,9 +296,9 @@ function bindButtons(): void {
       const action = button.dataset.action as GameAction | undefined;
       if (!action) return;
       if (action === "restart") resetOpeningTutorial();
-      state = applyAction(state, action, { cheatMode: EDITOR_ENABLED && cheatMode });
+      state = applyAction(state, action, { cheatMode });
       syncMusicNow();
-      if (EDITOR_ENABLED && action === "restart") clearEditSelection();
+      if (action === "restart") clearEditSelection();
       updateUi();
     });
   });
@@ -399,21 +309,18 @@ function bindButtons(): void {
       const move = button.dataset.move as MoveAction | undefined;
       if (!move) return;
       if (handleOpeningTutorialStart()) return;
-      state = applyAction(state, move, { allowMoveFromTerminal: (EDITOR_ENABLED && editMode) || (EDITOR_ENABLED && cheatMode), cheatMode: EDITOR_ENABLED && cheatMode });
+      state = applyAction(state, move, { allowMoveFromTerminal: editMode || cheatMode, cheatMode });
       syncMusicNow();
       updateUi();
     });
   });
 
-  if (EDITOR_ENABLED) {
-    document.querySelectorAll<HTMLButtonElement>("[data-toggle-map]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const tools = editor();
-        const hidden = tools.mapDrawer.hasAttribute("hidden");
-        tools.mapDrawer.toggleAttribute("hidden", !hidden);
-      });
+  document.querySelectorAll<HTMLButtonElement>("[data-toggle-map]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const hidden = elements.mapDrawer.hasAttribute("hidden");
+      elements.mapDrawer.toggleAttribute("hidden", !hidden);
     });
-  }
+  });
 
   elements.creditsOpen.addEventListener("click", openCreditsModal);
 
@@ -434,11 +341,8 @@ function bindButtons(): void {
     updateMusicToggle();
   });
 
-  if (!EDITOR_ENABLED) return;
-  const tools = editor();
-
   requireElement<HTMLButtonElement>("[data-stage-apply]").addEventListener("click", () => {
-    applyMapText(tools.stageMap.value, true, { preservePlayer: editMode });
+    applyMapText(elements.stageMap.value, true, { preservePlayer: editMode });
   });
 
   requireElement<HTMLButtonElement>("[data-stage-copy]").addEventListener("click", () => {
@@ -447,53 +351,53 @@ function bindButtons(): void {
 
   requireElement<HTMLButtonElement>("[data-stage-reset]").addEventListener("click", () => {
     resetOpeningTutorial();
-    tools.stageMap.value = baselineStageMap();
-    applyMapText(tools.stageMap.value, true, { preservePlayer: false });
-    tools.validation.value = "Reset Stage 1 to v110B final candidate route.";
+    elements.stageMap.value = baselineStageMap();
+    applyMapText(elements.stageMap.value, true, { preservePlayer: false });
+    elements.validation.value = "Reset Stage 1 to v110B final candidate route.";
   });
 
   requireElement<HTMLButtonElement>("[data-stage-validate]").addEventListener("click", () => {
-    const output = validateStageMap(tools.stageMap.value);
-    tools.validation.value = output;
+    const output = validateStageMap(elements.stageMap.value);
+    elements.validation.value = output;
     setMapStatus(output.startsWith("OK:") ? "Validation passed." : "Validation failed.", output.startsWith("OK:") ? "ok" : "error");
   });
 
   requireElement<HTMLButtonElement>("[data-feedback-copy]").addEventListener("click", () => {
-    copyText(exportStageFeedback(BUILD_ID, tools.stageMap.value, state), "Copied feedback block.");
+    copyText(exportStageFeedback(BUILD_ID, elements.stageMap.value, state), "Copied feedback block.");
   });
 
-  tools.editToggle.addEventListener("click", () => {
+  elements.editToggle.addEventListener("click", () => {
     editMode = !editMode;
     clearEditSelection();
     hideLaneHover();
     dragStart = undefined;
-    tools.cameraPanel.toggleAttribute("hidden", !editMode);
-    tools.editToggle.classList.toggle("is-active", editMode);
-    tools.editToggle.setAttribute("aria-pressed", String(editMode));
+    elements.cameraPanel.toggleAttribute("hidden", !editMode);
+    elements.editToggle.classList.toggle("is-active", editMode);
+    elements.editToggle.setAttribute("aria-pressed", String(editMode));
     updateGameplayZoomGuide();
     setMapStatus(editMode ? "Edit Mode on. Arrows move safely; Shift+Up/Down cycles variants." : "Edit Mode off.", "neutral");
   });
 
-  tools.cameraPreset.addEventListener("change", () => {
-    renderer.setCameraPreset(tools.cameraPreset.value as CameraPresetId);
-    setMapStatus(`Editor camera: ${tools.cameraPreset.selectedOptions[0]?.textContent ?? tools.cameraPreset.value}.`, "neutral");
+  elements.cameraPreset.addEventListener("change", () => {
+    renderer.setCameraPreset(elements.cameraPreset.value as CameraPresetId);
+    setMapStatus(`Editor camera: ${elements.cameraPreset.selectedOptions[0]?.textContent ?? elements.cameraPreset.value}.`, "neutral");
   });
 
-  tools.cameraZoom.addEventListener("input", () => {
-    renderer.setCameraZoom(Number(tools.cameraZoom.value));
+  elements.cameraZoom.addEventListener("input", () => {
+    renderer.setCameraZoom(Number(elements.cameraZoom.value));
     updateGameplayZoomGuide();
   });
 
-  tools.avatarCharacter.addEventListener("change", () => {
-    applyAvatarCharacter(tools.avatarCharacter.value);
-    setMapStatus(`Avatar: ${tools.avatarCharacter.selectedOptions[0]?.textContent ?? tools.avatarCharacter.value}.`, "neutral");
+  elements.avatarCharacter.addEventListener("change", () => {
+    applyAvatarCharacter(elements.avatarCharacter.value);
+    setMapStatus(`Avatar: ${elements.avatarCharacter.selectedOptions[0]?.textContent ?? elements.avatarCharacter.value}.`, "neutral");
   });
-  tools.avatarBackground.addEventListener("change", () => {
-    applyAvatarBackground(tools.avatarBackground.value);
-    setMapStatus(`Avatar background: ${tools.avatarBackground.selectedOptions[0]?.textContent ?? tools.avatarBackground.value}.`, "neutral");
+  elements.avatarBackground.addEventListener("change", () => {
+    applyAvatarBackground(elements.avatarBackground.value);
+    setMapStatus(`Avatar background: ${elements.avatarBackground.selectedOptions[0]?.textContent ?? elements.avatarBackground.value}.`, "neutral");
   });
 
-  tools.avatarDrag.addEventListener("pointerdown", beginAvatarVerticalDrag);
+  elements.avatarDrag.addEventListener("pointerdown", beginAvatarVerticalDrag);
   avatarBox.addEventListener("pointerdown", beginAvatarVerticalDrag);
   document.querySelectorAll<HTMLButtonElement>("[data-avatar-zoom-step]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -509,115 +413,114 @@ function bindButtons(): void {
     updateAvatarFraming();
     setMapStatus("Avatar zoom reset.", "neutral");
   });
-  tools.controlStyle.addEventListener("change", () => {
-    applyControlStyle(tools.controlStyle.value);
-    setMapStatus(`Button style: ${tools.controlStyle.selectedOptions[0]?.textContent ?? tools.controlStyle.value}.`, "neutral");
+  elements.controlStyle.addEventListener("change", () => {
+    applyControlStyle(elements.controlStyle.value);
+    setMapStatus(`Button style: ${elements.controlStyle.selectedOptions[0]?.textContent ?? elements.controlStyle.value}.`, "neutral");
   });
-  tools.backgroundTheme.addEventListener("change", () => {
-    applyBackgroundTheme(tools.backgroundTheme.value);
-    setMapStatus(`Background: ${tools.backgroundTheme.selectedOptions[0]?.textContent ?? tools.backgroundTheme.value}.`, "neutral");
+  elements.backgroundTheme.addEventListener("change", () => {
+    applyBackgroundTheme(elements.backgroundTheme.value);
+    setMapStatus(`Background: ${elements.backgroundTheme.selectedOptions[0]?.textContent ?? elements.backgroundTheme.value}.`, "neutral");
   });
-  tools.borderStyle.addEventListener("change", () => {
-    applyBorderStyle(tools.borderStyle.value);
-    setMapStatus(`Border style: ${tools.borderStyle.selectedOptions[0]?.textContent ?? tools.borderStyle.value}.`, "neutral");
+  elements.borderStyle.addEventListener("change", () => {
+    applyBorderStyle(elements.borderStyle.value);
+    setMapStatus(`Border style: ${elements.borderStyle.selectedOptions[0]?.textContent ?? elements.borderStyle.value}.`, "neutral");
   });
-  tools.dialoguePanel.addEventListener("change", () => {
-    applyDialoguePanel(tools.dialoguePanel.value);
-    setMapStatus(`Dialogue panel: ${tools.dialoguePanel.selectedOptions[0]?.textContent ?? tools.dialoguePanel.value}.`, "neutral");
+  elements.dialoguePanel.addEventListener("change", () => {
+    applyDialoguePanel(elements.dialoguePanel.value);
+    setMapStatus(`Dialogue panel: ${elements.dialoguePanel.selectedOptions[0]?.textContent ?? elements.dialoguePanel.value}.`, "neutral");
   });
-  tools.laneHoverCopy.addEventListener("click", (event) => {
+  elements.laneHoverCopy.addEventListener("click", (event) => {
     event.stopPropagation();
     if (!hoveredLaneLine) return;
     copyText(hoveredLaneLine, "Copied lane row.");
   });
-  tools.laneHoverEdit.addEventListener("click", (event) => {
+  elements.laneHoverEdit.addEventListener("click", (event) => {
     event.stopPropagation();
     setLanePopupEditing(true);
   });
-  tools.laneHoverApply.addEventListener("click", (event) => {
+  elements.laneHoverApply.addEventListener("click", (event) => {
     event.stopPropagation();
     applySelectedLaneEdit();
   });
-  tools.laneHoverCancel.addEventListener("click", (event) => {
+  elements.laneHoverCancel.addEventListener("click", (event) => {
     event.stopPropagation();
-    tools.laneHoverText.value = hoveredLaneLine;
+    elements.laneHoverText.value = hoveredLaneLine;
     setLanePopupEditing(false);
   });
 }
 
 function populateCameraControls(): void {
-  const tools = editor();
-  tools.cameraPreset.innerHTML = "";
+  elements.cameraPreset.innerHTML = "";
   for (const option of CAMERA_PRESET_OPTIONS) {
     const element = document.createElement("option");
     element.value = option.id;
     element.textContent = option.label;
-    tools.cameraPreset.appendChild(element);
+    elements.cameraPreset.appendChild(element);
   }
-  tools.cameraPreset.value = DEFAULT_CAMERA_PRESET;
-  tools.cameraZoom.value = String(DEFAULT_CAMERA_ZOOM_PERCENT);
-  tools.avatarCharacter.innerHTML = "";
+  elements.cameraPreset.value = DEFAULT_CAMERA_PRESET;
+  elements.cameraZoom.value = String(DEFAULT_CAMERA_ZOOM_PERCENT);
+  elements.avatarCharacter.innerHTML = "";
   for (const option of AVATAR_CHARACTER_OPTIONS) {
     const element = document.createElement("option");
     element.value = option.id;
     element.textContent = option.label;
-    tools.avatarCharacter.appendChild(element);
+    elements.avatarCharacter.appendChild(element);
   }
-  tools.avatarCharacter.value = avatarCharacterId;
+  elements.avatarCharacter.value = avatarCharacterId;
   elements.speaker.textContent = avatarOptionById(avatarCharacterId).label;
   avatarBox.querySelector("span")?.replaceChildren(document.createTextNode(avatarCharacterId === "mr-awesome" ? "A" : "N"));
-  tools.avatarBackground.innerHTML = "";
+  elements.avatarBackground.innerHTML = "";
   for (const option of AVATAR_BACKGROUND_OPTIONS) {
     const element = document.createElement("option");
     element.value = option.id;
     element.textContent = option.label;
-    tools.avatarBackground.appendChild(element);
+    elements.avatarBackground.appendChild(element);
   }
-  tools.avatarBackground.value = readAvatarBackground();
-  applyAvatarBackground(tools.avatarBackground.value);
-  tools.controlStyle.innerHTML = "";
+  elements.avatarBackground.value = readAvatarBackground();
+  applyAvatarBackground(elements.avatarBackground.value);
+  elements.controlStyle.innerHTML = "";
   for (const option of CONTROL_STYLE_OPTIONS) {
     const element = document.createElement("option");
     element.value = option.id;
     element.textContent = option.label;
-    tools.controlStyle.appendChild(element);
+    elements.controlStyle.appendChild(element);
   }
-  tools.controlStyle.value = readControlStyle();
-  applyControlStyle(tools.controlStyle.value);
-  tools.backgroundTheme.innerHTML = "";
+  elements.controlStyle.value = readControlStyle();
+  applyControlStyle(elements.controlStyle.value);
+  elements.backgroundTheme.innerHTML = "";
   for (const option of BACKGROUND_THEME_OPTIONS) {
     const element = document.createElement("option");
     element.value = option.id;
     element.textContent = option.label;
-    tools.backgroundTheme.appendChild(element);
+    elements.backgroundTheme.appendChild(element);
   }
-  tools.backgroundTheme.value = readBackgroundTheme();
-  applyBackgroundTheme(tools.backgroundTheme.value);
-  tools.borderStyle.innerHTML = "";
+  elements.backgroundTheme.value = readBackgroundTheme();
+  applyBackgroundTheme(elements.backgroundTheme.value);
+  elements.borderStyle.innerHTML = "";
   for (const option of BORDER_STYLE_OPTIONS) {
     const element = document.createElement("option");
     element.value = option.id;
     element.textContent = option.label;
-    tools.borderStyle.appendChild(element);
+    elements.borderStyle.appendChild(element);
   }
-  tools.borderStyle.value = readBorderStyle();
-  applyBorderStyle(tools.borderStyle.value);
-  tools.dialoguePanel.innerHTML = "";
+  elements.borderStyle.value = readBorderStyle();
+  applyBorderStyle(elements.borderStyle.value);
+  elements.dialoguePanel.innerHTML = "";
   for (const option of DIALOGUE_PANEL_OPTIONS) {
     const element = document.createElement("option");
     element.value = option.id;
     element.textContent = option.label;
-    tools.dialoguePanel.appendChild(element);
+    elements.dialoguePanel.appendChild(element);
   }
-  tools.dialoguePanel.value = readDialoguePanel();
-  applyDialoguePanel(tools.dialoguePanel.value);
+  elements.dialoguePanel.value = readDialoguePanel();
+  applyDialoguePanel(elements.dialoguePanel.value);
   updateAvatarFraming();
   updateGameplayZoomGuide();
 }
 
 function applyControlStyle(value: string): void {
   const style = isControlStyleId(value) ? value : DEFAULT_CONTROL_STYLE;
-  if (editorElements) editorElements.controlStyle.value = style;
+  elements.controlStyle.value = style;
   composition.dataset.controlTheme = style;
   window.localStorage.setItem(CONTROL_STYLE_STORAGE_KEY, style);
 }
@@ -633,7 +536,7 @@ function isControlStyleId(value: unknown): value is ControlStyleId {
 
 function applyBackgroundTheme(value: string): void {
   const theme = isBackgroundThemeId(value) ? value : DEFAULT_BACKGROUND_THEME;
-  if (editorElements) editorElements.backgroundTheme.value = theme;
+  elements.backgroundTheme.value = theme;
   document.body.dataset.pageBackgroundTheme = theme;
   window.localStorage.setItem(BACKGROUND_THEME_STORAGE_KEY, theme);
 }
@@ -649,7 +552,7 @@ function isBackgroundThemeId(value: unknown): value is BackgroundThemeId {
 
 function applyBorderStyle(value: string): void {
   const style = isBorderStyleId(value) ? value : DEFAULT_BORDER_STYLE;
-  if (editorElements) editorElements.borderStyle.value = style;
+  elements.borderStyle.value = style;
   composition.dataset.borderStyle = style;
   window.localStorage.setItem(BORDER_STYLE_STORAGE_KEY, style);
 }
@@ -665,7 +568,7 @@ function isBorderStyleId(value: unknown): value is BorderStyleId {
 
 function applyDialoguePanel(value: string): void {
   const panel = isDialoguePanelId(value) ? value : DEFAULT_DIALOGUE_PANEL;
-  if (editorElements) editorElements.dialoguePanel.value = panel;
+  elements.dialoguePanel.value = panel;
   composition.dataset.dialoguePanel = panel;
   window.localStorage.setItem(DIALOGUE_PANEL_STORAGE_KEY, panel);
 }
@@ -682,7 +585,7 @@ function isDialoguePanelId(value: unknown): value is DialoguePanelId {
 function applyAvatarBackground(value: string, options: { persist?: boolean } = {}): void {
   const shouldPersist = options.persist ?? true;
   const background = isAvatarBackgroundId(value) ? value : DEFAULT_AVATAR_BACKGROUND;
-  if (editorElements) editorElements.avatarBackground.value = background;
+  elements.avatarBackground.value = background;
   avatarBox.dataset.avatarBackground = background;
   if (shouldPersist) window.localStorage.setItem(AVATAR_BACKGROUND_STORAGE_KEY, background);
 }
@@ -709,7 +612,7 @@ function applyAvatarCharacter(value: string, options: { persist?: boolean } = {}
   const nextCharacter = isAvatarCharacterId(value) ? value : DEFAULT_AVATAR_CHARACTER;
   const option = avatarOptionById(nextCharacter);
   avatarCharacterId = nextCharacter;
-  if (editorElements) editorElements.avatarCharacter.value = nextCharacter;
+  elements.avatarCharacter.value = nextCharacter;
   elements.speaker.textContent = option.label;
   avatarBox.dataset.avatarPortrait = nextCharacter;
   const savedFraming = avatarFramingByCharacter.get(nextCharacter) ?? { verticalPercent: 0, zoomPercent: AVATAR_ZOOM_DEFAULT };
@@ -825,11 +728,10 @@ function endAvatarVerticalDrag(): void {
 }
 
 function updateGameplayZoomGuide(): void {
-  if (!editorElements) return;
-  const currentZoom = Number(editorElements.cameraZoom.value);
+  const currentZoom = Number(elements.cameraZoom.value);
   const scale = Math.max(0.2, Math.min(1, currentZoom / DEFAULT_CAMERA_ZOOM_PERCENT));
-  editorElements.gameplayZoomGuide.style.setProperty("--guide-scale", String(scale));
-  editorElements.gameplayZoomGuide.hidden = !editMode || scale >= 0.995;
+  elements.gameplayZoomGuide.style.setProperty("--guide-scale", String(scale));
+  elements.gameplayZoomGuide.hidden = !editMode || scale >= 0.995;
 }
 
 function unlockMusic(): void {
@@ -838,7 +740,7 @@ function unlockMusic(): void {
 }
 
 function syncMusicNow(): void {
-  music.sync(state, { cheatMode: EDITOR_ENABLED && cheatMode });
+  music.sync(state, { cheatMode });
 }
 
 function readStoredMusicEnabled(): boolean {
@@ -869,8 +771,8 @@ function bindKeyboard(): void {
     ["P", "pause"],
     ["r", "restart"],
     ["R", "restart"],
+    ["`", "toggleMap"],
   ]);
-  if (EDITOR_ENABLED) keyMap.set("`", "toggleMap");
 
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !elements.creditsModal.hidden) {
@@ -878,7 +780,7 @@ function bindKeyboard(): void {
       closeCreditsModal();
       return;
     }
-    if (EDITOR_ENABLED && event.key === "Tab" && !isTypingTarget(event.target)) {
+    if (event.key === "Tab" && !isTypingTarget(event.target)) {
       event.preventDefault();
       debugControlsVisible = !debugControlsVisible;
       updateUi();
@@ -886,7 +788,7 @@ function bindKeyboard(): void {
     }
     if (event.repeat || isTypingTarget(event.target)) return;
     unlockMusic();
-    if (EDITOR_ENABLED && event.key === "CapsLock") {
+    if (event.key === "CapsLock") {
       event.preventDefault();
       cheatMode = !cheatMode;
       if (cheatMode) state = enterCheatMode(state);
@@ -895,17 +797,16 @@ function bindKeyboard(): void {
       updateUi();
       return;
     }
-    if (EDITOR_ENABLED && editMode && handleEditKey(event)) return;
+    if (editMode && handleEditKey(event)) return;
     const mapped = keyMap.get(event.key);
     if (!mapped) return;
     event.preventDefault();
     if (mapped !== "toggleMap" && handleOpeningTutorialStart()) return;
     if (mapped === "toggleMap") {
-      if (!EDITOR_ENABLED) return;
-      editor().mapDrawer.toggleAttribute("hidden");
+      elements.mapDrawer.toggleAttribute("hidden");
       return;
     }
-    state = applyAction(state, mapped, { allowMoveFromTerminal: (EDITOR_ENABLED && editMode) || (EDITOR_ENABLED && cheatMode), cheatMode: EDITOR_ENABLED && cheatMode });
+    state = applyAction(state, mapped, { allowMoveFromTerminal: editMode || cheatMode, cheatMode });
     syncMusicNow();
     updateUi();
   }, { capture: true });
@@ -914,7 +815,7 @@ function bindKeyboard(): void {
 function bindPointer(): void {
   gameView.addEventListener("pointerdown", (event) => {
     unlockMusic();
-    if (EDITOR_ENABLED && editMode) {
+    if (editMode) {
       const tile = renderer.getTileFromPointer(event);
       const stage = parseStageMap(state.stageMap).stage;
       const object = tile && stage ? objectAt(stage, tile) : undefined;
@@ -940,7 +841,7 @@ function bindPointer(): void {
   });
 
   gameView.addEventListener("pointermove", (event) => {
-    if (!EDITOR_ENABLED || !editMode) return;
+    if (!editMode) return;
     const tile = renderer.getTileFromPointer(event);
     hoveredTile = tile;
     if (tile && dragStart) {
@@ -953,7 +854,7 @@ function bindPointer(): void {
   });
 
   gameView.addEventListener("pointerup", (event) => {
-    if (EDITOR_ENABLED && editMode && dragStart) {
+    if (editMode && dragStart) {
       const tile = renderer.getTileFromPointer(event);
       const stage = parseStageMap(state.stageMap).stage;
       if (tile && stage) {
@@ -976,11 +877,11 @@ function bindPointer(): void {
     if (handleOpeningTutorialStart()) return;
     const threshold = 26;
     if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) {
-      state = applyAction(state, "forward", { allowMoveFromTerminal: EDITOR_ENABLED && cheatMode, cheatMode: EDITOR_ENABLED && cheatMode });
+      state = applyAction(state, "forward", { allowMoveFromTerminal: cheatMode, cheatMode });
     } else if (Math.abs(dx) > Math.abs(dy)) {
-      state = applyAction(state, dx < 0 ? "left" : "right", { allowMoveFromTerminal: EDITOR_ENABLED && cheatMode, cheatMode: EDITOR_ENABLED && cheatMode });
+      state = applyAction(state, dx < 0 ? "left" : "right", { allowMoveFromTerminal: cheatMode, cheatMode });
     } else {
-      state = applyAction(state, dy < 0 ? "forward" : "backward", { allowMoveFromTerminal: EDITOR_ENABLED && cheatMode, cheatMode: EDITOR_ENABLED && cheatMode });
+      state = applyAction(state, dy < 0 ? "forward" : "backward", { allowMoveFromTerminal: cheatMode, cheatMode });
     }
     syncMusicNow();
     updateUi();
@@ -989,11 +890,11 @@ function bindPointer(): void {
   gameView.addEventListener("pointercancel", () => {
     pointerStart = undefined;
     dragStart = undefined;
-    if (EDITOR_ENABLED) hideLaneHover();
+    hideLaneHover();
   });
 
   gameBoard.addEventListener("pointerleave", () => {
-    if (EDITOR_ENABLED) hideLaneHover();
+    hideLaneHover();
   });
 }
 
@@ -1063,16 +964,15 @@ interface ApplyMapTextOptions {
 }
 
 function applyMapText(mapText: string, persist: boolean, options: ApplyMapTextOptions = {}): void {
-  const tools = editor();
   const result = parseStageMap(mapText);
-  tools.validation.value = result.ok ? validateStageMap(mapText) : result.errors.join("\n");
+  elements.validation.value = result.ok ? validateStageMap(mapText) : result.errors.join("\n");
   if (!result.ok || !result.stage) {
     hideLaneHover();
     setMapStatus("Map failed validation.", "error");
     return;
   }
   const normalizedMap = result.stage.source;
-  tools.stageMap.value = normalizedMap;
+  elements.stageMap.value = normalizedMap;
   state = applyStage(state, result.stage, normalizedMap, { preservePlayer: options.preservePlayer ?? false });
   clearEditSelection();
   if (persist) saveStageMap(normalizedMap);
@@ -1081,23 +981,22 @@ function applyMapText(mapText: string, persist: boolean, options: ApplyMapTextOp
 }
 
 function copyStageMap(): void {
-  const tools = editor();
-  const result = parseStageMap(tools.stageMap.value);
-  const mapText = result.ok && result.stage ? result.stage.source : tools.stageMap.value;
-  tools.stageMap.value = mapText;
+  const result = parseStageMap(elements.stageMap.value);
+  const mapText = result.ok && result.stage ? result.stage.source : elements.stageMap.value;
+  elements.stageMap.value = mapText;
   copyText(mapText, result.ok ? "Copied normalized Stage 1 map." : "Copied Stage 1 map with validation errors.");
 }
 
 function updateUi(): void {
   elements.phase.textContent = phaseLabel(state.phase);
-  if (EDITOR_ENABLED && cheatMode) elements.phase.textContent = "Cheat";
+  if (cheatMode) elements.phase.textContent = "Cheat";
   elements.score.textContent = String(state.score);
   elements.best.textContent = String(state.bestScore);
   elements.pancakes.textContent = String(state.collectedPancakes.size);
   elements.clearOverlay.hidden = state.phase !== "complete";
   elements.crashOverlay.hidden = state.phase !== "crashed";
   updateOpeningTutorialVisuals();
-  let nextDialogue = dialogueDirector.update(previousDialogueState, state, { editMode: EDITOR_ENABLED && editMode, cheatMode: EDITOR_ENABLED && cheatMode });
+  let nextDialogue = dialogueDirector.update(previousDialogueState, state, { editMode, cheatMode });
   if ((openingTutorialDismissed || openingTutorialAnimating) && nextDialogue?.eventType === "OPENING_TUTORIAL") nextDialogue = undefined;
   previousDialogueState = state;
   if (!nextDialogue) {
@@ -1132,22 +1031,19 @@ function updateOpeningTutorialVisuals(): void {
   composition.classList.toggle("is-opening-tutorial", active);
   composition.classList.toggle("is-opening-tutorial-idle", active && !openingTutorialAnimating && state.time >= 3);
   composition.classList.toggle("is-opening-tutorial-exiting", active && openingTutorialAnimating);
-  const showDebugControls = EDITOR_ENABLED && debugControlsVisible;
-  composition.classList.toggle("is-debug-controls-visible", showDebugControls);
-  elements.statusStrip.hidden = !showDebugControls;
-  elements.bottomActions.hidden = !showDebugControls;
+  composition.classList.toggle("is-debug-controls-visible", debugControlsVisible);
+  elements.statusStrip.hidden = !debugControlsVisible;
+  elements.bottomActions.hidden = !debugControlsVisible;
 }
 
 function shouldShowOpeningTutorial(): boolean {
-  const editorActive = EDITOR_ENABLED && editMode;
-  const cheatActive = EDITOR_ENABLED && cheatMode;
-  if (!editorActive && !cheatActive && state.stage.mode === "postVictoryTutorial") return true;
+  if (!editMode && !cheatMode && state.stage.mode === "postVictoryTutorial") return true;
   const atStartTile = state.player.x === state.stage.playerStart.x
     && state.player.z === state.stage.playerStart.z
     && !state.player.hop;
   return !openingTutorialDismissed
-    && !editorActive
-    && !cheatActive
+    && !editMode
+    && !cheatMode
     && state.stage.mode === "introPancakes"
     && (state.phase === "ready" || state.phase === "running")
     && state.collectedPancakes.size === 0
@@ -1190,16 +1086,14 @@ function saveStageMap(mapText: string): void {
 }
 
 function setMapStatus(message: string, tone: "ok" | "error" | "neutral"): void {
-  if (!editorElements) return;
-  editorElements.mapStatus.textContent = message;
-  editorElements.mapStatus.dataset.tone = tone;
+  elements.mapStatus.textContent = message;
+  elements.mapStatus.dataset.tone = tone;
 }
 
 function applyEditResult(result: MoveStageObjectResult, action: "move" | "copy" | "variant"): void {
-  const tools = editor();
   if (result.ok && result.stage && result.mapText) {
     hideLaneHover();
-    tools.stageMap.value = result.mapText;
+    elements.stageMap.value = result.mapText;
     state = applyStage(state, result.stage, result.mapText, { preservePlayer: editMode });
     saveStageMap(result.mapText);
     selectedObject = result.object ? cloneObject(result.object) : undefined;
@@ -1245,18 +1139,17 @@ function clearEditSelection(): void {
 }
 
 function applySelectedLaneEdit(): void {
-  const tools = editor();
   if (selectedLaneZ === undefined) {
     setMapStatus("Click an empty lane tile before applying lane edits.", "error");
     return;
   }
-  const editedLine = tools.laneHoverText.value.trim();
+  const editedLine = elements.laneHoverText.value.trim();
   const expectedPrefix = `z=${String(selectedLaneZ).padStart(2, "0")} `;
   if (!editedLine.startsWith(expectedPrefix)) {
     setMapStatus(`Keep the selected lane as ${expectedPrefix.trim()} and edit only its design/tuning.`, "error");
     return;
   }
-  const currentMap = tools.stageMap.value;
+  const currentMap = elements.stageMap.value;
   const lines = currentMap.split("\n");
   const lineIndex = lines.findIndex((line) => line.startsWith(expectedPrefix));
   if (lineIndex < 0) {
@@ -1266,25 +1159,24 @@ function applySelectedLaneEdit(): void {
   lines[lineIndex] = editedLine;
   const nextMap = lines.join("\n");
   const result = parseStageMap(nextMap);
-  tools.validation.value = result.ok ? validateStageMap(nextMap) : result.errors.join("\n");
+  elements.validation.value = result.ok ? validateStageMap(nextMap) : result.errors.join("\n");
   if (!result.ok || !result.stage) {
     setMapStatus("Lane edit failed validation.", "error");
     return;
   }
   const normalizedMap = result.stage.source;
-  tools.stageMap.value = normalizedMap;
+  elements.stageMap.value = normalizedMap;
   state = applyStage(state, result.stage, normalizedMap, { preservePlayer: editMode });
   saveStageMap(normalizedMap);
   hoveredLaneLine = serializedLaneLine(result.stage, selectedLaneZ);
-  tools.laneHoverCode.textContent = hoveredLaneLine;
-  tools.laneHoverText.value = hoveredLaneLine;
+  elements.laneHoverCode.textContent = hoveredLaneLine;
+  elements.laneHoverText.value = hoveredLaneLine;
   setLanePopupEditing(false);
   setMapStatus(`Applied ${expectedPrefix.trim()}.`, "ok");
   updateUi();
 }
 
 function showLaneCard(event: PointerEvent): void {
-  const tools = editor();
   if (!editMode || dragStart) {
     hideLaneHover();
     return;
@@ -1302,13 +1194,13 @@ function showLaneCard(event: PointerEvent): void {
   }
   hoveredLaneLine = line;
   selectedLaneZ = tile.z;
-  tools.laneHoverCode.textContent = line;
-  tools.laneHoverText.value = line;
+  elements.laneHoverCode.textContent = line;
+  elements.laneHoverText.value = line;
   setLanePopupEditing(false);
-  tools.laneHover.hidden = false;
+  elements.laneHover.hidden = false;
   const rect = gameView.getBoundingClientRect();
-  const cardRect = tools.laneHover.getBoundingClientRect();
-  const drawerRect = tools.mapDrawer.hasAttribute("hidden") ? undefined : tools.mapDrawer.getBoundingClientRect();
+  const cardRect = elements.laneHover.getBoundingClientRect();
+  const drawerRect = elements.mapDrawer.hasAttribute("hidden") ? undefined : elements.mapDrawer.getBoundingClientRect();
   const drawerOverlapsBoard = drawerRect
     && drawerRect.left < rect.right
     && drawerRect.right > rect.left
@@ -1319,29 +1211,28 @@ function showLaneCard(event: PointerEvent): void {
     : rect.width - cardRect.width - 8;
   const left = clampNumber(event.clientX - rect.left + 14, 8, maxLeft);
   const top = clampNumber(event.clientY - rect.top - cardRect.height - 12, 8, rect.height - cardRect.height - 8);
-  tools.laneHover.style.left = `${left}px`;
-  tools.laneHover.style.top = `${top}px`;
+  elements.laneHover.style.left = `${left}px`;
+  elements.laneHover.style.top = `${top}px`;
 }
 
 function hideLaneHover(): void {
   hoveredLaneLine = "";
   selectedLaneZ = undefined;
   setLanePopupEditing(false);
-  if (editorElements) editorElements.laneHover.hidden = true;
+  elements.laneHover.hidden = true;
 }
 
 function setLanePopupEditing(editing: boolean): void {
-  if (!editorElements) return;
-  editorElements.laneHover.dataset.editing = String(editing);
-  editorElements.laneHoverCode.hidden = editing;
-  editorElements.laneHoverText.hidden = !editing;
-  editorElements.laneHoverEdit.hidden = editing;
-  editorElements.laneHoverApply.hidden = !editing;
-  editorElements.laneHoverCancel.hidden = !editing;
+  elements.laneHover.dataset.editing = String(editing);
+  elements.laneHoverCode.hidden = editing;
+  elements.laneHoverText.hidden = !editing;
+  elements.laneHoverEdit.hidden = editing;
+  elements.laneHoverApply.hidden = !editing;
+  elements.laneHoverCancel.hidden = !editing;
   if (editing) {
-    editorElements.laneHoverText.value = hoveredLaneLine;
-    editorElements.laneHoverText.focus();
-    editorElements.laneHoverText.select();
+    elements.laneHoverText.value = hoveredLaneLine;
+    elements.laneHoverText.focus();
+    elements.laneHoverText.select();
   }
 }
 
@@ -1382,9 +1273,8 @@ function fallbackCopyText(text: string, message: string): void {
     setMapStatus(message, "ok");
     return;
   }
-  if (!editorElements) return;
-  editorElements.validation.value = text;
-  editorElements.validation.select();
+  elements.validation.value = text;
+  elements.validation.select();
   setMapStatus("Clipboard blocked; requested text selected below.", "error");
 }
 
