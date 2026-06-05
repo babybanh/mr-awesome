@@ -19,7 +19,7 @@ const FILE_SFX_VOLUME: Record<FileSfxKey, number> = {
   reveal: 0.36,
   escape: 0.36,
   crash: 0.36,
-  pickup: 0.32,
+  pickup: 0.48,
 };
 const PICKUP_MIN_INTERVAL_SECONDS = 0.11;
 
@@ -117,12 +117,12 @@ export class SfxManager {
     if (gameTime - this.lastDialogueBlipAt < 0.14) return;
     this.lastDialogueBlipAt = gameTime;
     if (speaker === "A") {
-      this.tone(520, 0.055, "triangle", 0.042, 0);
-      this.tone(690, 0.045, "sine", 0.028, 0.035);
+      this.tone(520, 0.055, "triangle", 0.084, 0);
+      this.tone(690, 0.045, "sine", 0.056, 0.035);
       return;
     }
-    this.tone(255, 0.065, "triangle", 0.044, 0);
-    this.tone(178, 0.055, "sine", 0.03, 0.04);
+    this.tone(255, 0.065, "triangle", 0.088, 0);
+    this.tone(178, 0.055, "sine", 0.06, 0.04);
   }
 
   playTutorialPickup(): void {
@@ -176,9 +176,9 @@ export class SfxManager {
   }
 
   private playPickupTone(): void {
-    this.tone(520, 0.055, "square", 0.028, 0);
-    this.tone(780, 0.06, "triangle", 0.032, 0.055);
-    this.tone(1040, 0.075, "sine", 0.034, 0.115);
+    this.tone(520, 0.055, "square", 0.042, 0);
+    this.tone(780, 0.06, "triangle", 0.048, 0.055);
+    this.tone(1040, 0.075, "sine", 0.051, 0.115);
   }
 
   private tone(frequency: number, duration: number, type: OscillatorType, volume: number, delay: number): void {

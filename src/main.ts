@@ -1271,7 +1271,7 @@ function updateUi(): void {
       void elements.dialogueStrip.offsetWidth;
       elements.dialogueStrip.classList.add("is-dialogue-entering");
     }
-    sfx.playDialogueBlip(nextDialogue.speaker, state.time);
+    if (!isOpeningTutorialDialogue) sfx.playDialogueBlip(nextDialogue.speaker, state.time);
     lastDialogueKey = nextDialogueKey;
   }
 }
