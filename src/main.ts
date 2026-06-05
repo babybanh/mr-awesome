@@ -8,6 +8,40 @@ import { SfxManager } from "./game/SfxManager";
 import { CAMERA_PRESET_OPTIONS, DEFAULT_CAMERA_PRESET, DEFAULT_CAMERA_ZOOM_PERCENT, ThreeStageRenderer, type CameraPresetId, type RenderEditSelection } from "./render/ThreeStageRenderer";
 import { VillainAvatarRenderer, type AvatarModelDefinition } from "./render/VillainAvatarRenderer";
 
+function syncViewportMetrics(): void {
+  const viewport = window.visualViewport;
+  const width = Math.max(260, Math.round(viewport?.width ?? window.innerWidth));
+  const height = Math.max(300, Math.round(viewport?.height ?? window.innerHeight));
+  const root = document.documentElement;
+  const composition = document.getElementById("game-composition");
+  const gameBoard = document.getElementById("game-board");
+  const boardWidth = gameBoard?.getBoundingClientRect().width || composition?.getBoundingClientRect().width || Math.min(width, height);
+  const creditsAvailableWidth = Math.max(1, Math.min(boardWidth - 28, width - 28));
+  const creditsAvailableHeight = Math.max(1, height * 0.88);
+  const creditsScale = Math.min(1, creditsAvailableWidth / 540, creditsAvailableHeight / 360);
+  root.style.setProperty("--app-vw", `${width}px`);
+  root.style.setProperty("--app-vh", `${height}px`);
+  root.style.setProperty("--credits-scale", `${Math.max(0.1, creditsScale).toFixed(3)}`);
+  root.dataset.viewportTier = width >= 820 && height >= 820 ? "large" : width <= 560 || height <= 720 ? "small" : "medium";
+  root.dataset.viewportLandscapeCompact = width > height && height <= 760 ? "true" : "false";
+}
+
+function scheduleViewportSync(): void {
+  syncViewportMetrics();
+  window.requestAnimationFrame(syncViewportMetrics);
+  window.setTimeout(syncViewportMetrics, 120);
+  window.setTimeout(syncViewportMetrics, 420);
+  window.setTimeout(syncViewportMetrics, 900);
+}
+
+scheduleViewportSync();
+window.addEventListener("resize", scheduleViewportSync, { passive: true });
+window.addEventListener("orientationchange", scheduleViewportSync, { passive: true });
+window.addEventListener("pageshow", scheduleViewportSync);
+window.addEventListener("load", scheduleViewportSync, { once: true });
+window.visualViewport?.addEventListener("resize", scheduleViewportSync, { passive: true });
+window.visualViewport?.addEventListener("scroll", scheduleViewportSync, { passive: true });
+
 document.body.classList.add("app-ready");
 
 const STAGE_MAP_STORAGE_KEY = "awesome-superhero.stage1-map.v8";
@@ -424,8 +458,10 @@ function configureEditorAvailability(): void {
 }
 
 function openCreditsModal(): void {
+  scheduleViewportSync();
   elements.creditsModal.hidden = false;
   composition.classList.add("is-credits-open");
+  window.requestAnimationFrame(syncViewportMetrics);
   elements.creditsClose.focus();
 }
 
@@ -437,6 +473,21 @@ function closeCreditsModal(): void {
     syncMusicNow();
   }
   elements.creditsOpen.focus();
+}
+
+function isMoveAction(action: MoveAction | GameAction | "toggleMap"): action is MoveAction {
+  return action === "forward" || action === "backward" || action === "left" || action === "right";
+}
+
+function pulseMoveButton(action: MoveAction): void {
+  const button = document.querySelector<HTMLButtonElement>(`[data-move="${action}"]`);
+  if (!button) return;
+  button.classList.remove("is-pressing");
+  // Restart the CSS state even on rapid keyboard taps.
+  window.requestAnimationFrame(() => {
+    button.classList.add("is-pressing");
+    window.setTimeout(() => button.classList.remove("is-pressing"), 150);
+  });
 }
 
 function bindButtons(): void {
@@ -945,6 +996,7 @@ function bindKeyboard(): void {
     if (!mapped) return;
     event.preventDefault();
     if (!bootReady) return;
+    if (isMoveAction(mapped)) pulseMoveButton(mapped);
     if (mapped !== "toggleMap" && handleOpeningTutorialStart()) return;
     if (mapped === "toggleMap") {
       if (EDITOR_ENABLED) elements.mapDrawer.toggleAttribute("hidden");

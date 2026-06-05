@@ -852,30 +852,7 @@ export class ThreeStageRenderer {
         }
       }
     }
-    this.addFinalRescueEffects(state, renderWindow);
     this.addBillboardForegroundPass(player, renderWindow);
-  }
-
-  private addFinalRescueEffects(state: GameState, renderWindow: RenderWindow): void {
-    if (state.stage.mode !== "finalSequence" || state.stage.finalRescueStartedAt === undefined) return;
-    const elapsed = state.time - state.stage.finalRescueStartedAt;
-    if (elapsed < 0 || elapsed > 3.2) return;
-    const baseZ = state.stage.target.z - 0.8;
-    if (baseZ < renderWindow.minZ || baseZ > renderWindow.maxZ) return;
-    const progress = clamp(elapsed / 1.2, 0, 1);
-    const pop = Math.sin(progress * Math.PI);
-    const opacity = clamp(1 - Math.max(0, elapsed - 2.2), 0, 1);
-    const baseX = (state.player.x + state.stage.target.x) / 2;
-    const offsets = [-0.86, 0, 0.86];
-    offsets.forEach((offset, index) => {
-      const x = baseX + offset;
-      const z = baseZ + (index - 1) * 0.22;
-      const y = 0.42 + pop * 0.34 + index * 0.05;
-      this.addBox(x, y, z, 0.34, 0.34, 0.28, index === 1 ? PALETTE.playerRed : PALETTE.pancakeBase, true, opacity, true);
-      this.addBox(x, y + 0.28, z - 0.03, 0.24, 0.18, 0.2, index === 1 ? PALETTE.playerYellow : PALETTE.butterColor, true, opacity, true);
-      this.addBox(x + 0.28, y + 0.55 + pop * 0.08, z - 0.08, 0.08, 0.08, 0.04, PALETTE.butterColor, false, opacity, true);
-      this.addBox(x - 0.26, y + 0.5 + pop * 0.1, z + 0.06, 0.07, 0.07, 0.04, PALETTE.warningYellow, false, opacity, true);
-    });
   }
 
   private addPrimitiveHero(x: number, y: number, z: number, crashed: boolean): void {
