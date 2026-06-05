@@ -392,6 +392,12 @@ try {
   const stageMap = await import(new URL("stageMap.mjs", `file://${tmp}/`).href);
   const simulation = await import(new URL("simulation.mjs", `file://${tmp}/`).href);
   const dialogue = await import(new URL("dialogue.mjs", `file://${tmp}/`).href);
+  const openingTutorialLines = new Set([
+    "Use arrows. Grab pancakes!",
+    "Pancakes, please!",
+    "Try the arrow keys — I see pancakes!",
+    "Let’s get pancakes!",
+  ]);
 
   check("baseline map parses", () => stageMap.parseStageMap(stageMap.baselineStageMap()).ok);
   check("v110B baseline map parses and serializes", () => {
@@ -401,6 +407,28 @@ try {
       && result.stage?.name === "v110B_apartment_shop_final_candidate"
       && serialized.includes("z=462 W<")
       && serialized.includes("z=00 G");
+  });
+  check("baseline multi-row river chunks are not all one direction", () => {
+    const result = stageMap.parseStageMap(stageMap.baselineStageMap());
+    if (!result.ok || !result.stage) return false;
+    const lanes = [...result.stage.lanes].sort((a, b) => a.z - b.z);
+    let chunk = [];
+    const flush = () => {
+      if (chunk.length < 3) return true;
+      const firstDirection = chunk[0].direction;
+      return chunk.some((lane) => lane.direction !== firstDirection);
+    };
+    for (const lane of lanes) {
+      const previous = chunk[chunk.length - 1];
+      const continuesRiver = lane.kind === "river" && previous && previous.z + 1 === lane.z;
+      if (continuesRiver) {
+        chunk.push(lane);
+        continue;
+      }
+      if (!flush()) return false;
+      chunk = lane.kind === "river" ? [lane] : [];
+    }
+    return flush();
   });
   check("generated z=1000 map parses with continuous row order", () => {
     const result = stageMap.parseStageMap(thousandRowTown);
@@ -629,9 +657,11 @@ try {
   check("cheat mode bypasses intro river lock and moves three times faster", () => {
     const state = simulation.enterCheatMode(simulation.createInitialState(introBlockedRiverTown, 0, 0));
     const moved = simulation.applyAction(state, "forward", { cheatMode: true });
+    const normalMoved = simulation.applyAction(simulation.enterCheatMode(simulation.createInitialState(introBlockedRiverTown, 0, 0)), "forward");
     return moved.stage.mode === "chase"
       && moved.player.hop?.toZ === 1
-      && Math.abs(moved.player.hop.duration - (0.13 / 3)) < 0.0001;
+      && normalMoved.player.hop
+      && Math.abs(moved.player.hop.duration - (normalMoved.player.hop.duration / 3)) < 0.0001;
   });
   check("intro target starts hidden", () => {
     const state = simulation.createInitialState(introFivePancakeTown, 0, 0);
@@ -643,15 +673,17 @@ try {
     const panel = director.update(undefined, state, { editMode: false, cheatMode: false });
     return panel.speaker === "A"
       && panel.eventType === "OPENING_TUTORIAL"
-      && panel.text === "Hey there! I'm hungry for pancakes..."
+      && openingTutorialLines.has(panel.text)
       && !panel.text.includes("Nothing suspicious");
   });
-  check("opening tutorial switches to arrow nudge after five idle seconds", () => {
+  check("opening tutorial keeps one instruction line while idle", () => {
     let state = simulation.createInitialState(introFivePancakeTown, 0, 0);
     for (let index = 0; index < 104; index += 1) state = simulation.tickGame(state, 0.05, { hazardsEnabled: false });
     const director = new dialogue.DialogueDirector();
     const panel = director.update(undefined, state, { editMode: false, cheatMode: false });
-    return panel.speaker === "A" && panel.eventType === "OPENING_TUTORIAL" && panel.text === "Try the arrows!";
+    return panel.speaker === "A"
+      && panel.eventType === "OPENING_TUTORIAL"
+      && openingTutorialLines.has(panel.text);
   });
   check("opening tutorial does not return after first valid move", () => {
     const state = simulation.createInitialState(introRoadTown, 0, 0);
@@ -770,6 +802,77 @@ try {
       && ticked.stage.introCameraHandoffStartedAt === undefined
       && ticked.stage.targetRevealAt < ticked.time + 0.7;
   });
+  check("missed target auto-catches up to three times", () => {
+    const state = simulation.createInitialState(stageMap.baselineStageMap(), 0, 0);
+    const staged = {
+      ...state,
+      phase: "running",
+      player: { x: 0, z: 14, maxZ: 14 },
+      stage: {
+        ...state.stage,
+        mode: "chase",
+        target: { x: 0, z: 6, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 6 }],
+        catchCount: 1,
+        introCameraHandoffDone: true,
+      },
+    };
+    const ticked = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
+    const capped = simulation.tickGame(
+      {
+        ...staged,
+        stage: {
+          ...staged.stage,
+          autoTargetCatchCount: 3,
+        },
+      },
+      0.05,
+      { hazardsEnabled: false },
+    );
+    return ticked.stage.catchCount === 2
+      && ticked.stage.autoTargetCatchCount === 1
+      && ticked.stage.target.visible === false
+      && ticked.stage.targetPending?.z >= 26
+      && capped.stage.catchCount === 1
+      && capped.stage.autoTargetCatchCount === 3
+      && capped.stage.target.visible === true;
+  });
+  check("near-final target respawns at z453 before the final conversation", () => {
+    const state = simulation.createInitialState(stageMap.baselineStageMap(), 0, 0);
+    const staged = {
+      ...state,
+      phase: "running",
+      player: { x: 0, z: 433, maxZ: 433 },
+      stage: {
+        ...state.stage,
+        mode: "chase",
+        target: { x: 0, z: 433, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 433 }],
+        catchCount: 22,
+        introCameraHandoffDone: true,
+      },
+    };
+    const ticked = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
+    const finalCatch = simulation.tickGame(
+      {
+        ...ticked,
+        player: { x: ticked.stage.targetPending?.x ?? 0, z: 453, maxZ: 453 },
+        stage: {
+          ...ticked.stage,
+          target: { x: ticked.stage.targetPending?.x ?? 0, z: 453, visible: true },
+          targetPending: undefined,
+          targetRevealAt: undefined,
+          targetEscape: undefined,
+        },
+      },
+      0.05,
+      { hazardsEnabled: false },
+    );
+    return ticked.stage.targetPending?.z === 453
+      && ticked.stage.targetPending.x === 0
+      && finalCatch.stage.mode === "finalSequence"
+      && finalCatch.stage.finalStartedAt !== undefined;
+  });
   check("final ending starts when no safe forward target respawn exists", () => {
     const state = simulation.createInitialState(riverIntroTown, 0, 0);
     const staged = {
@@ -790,16 +893,19 @@ try {
     const director = new dialogue.DialogueDirector();
     const panel = director.update(staged, ticked, { editMode: false, cheatMode: false });
     return ticked.stage.mode === "finalSequence"
-      && ticked.stage.target.visible
+      && ticked.stage.target.visible === false
+      && ticked.stage.targetEscape?.z === 8
+      && ticked.stage.targetPending === undefined
       && ticked.stage.finalStartedAt !== undefined
       && ticked.stage.finalRescueStartedAt !== undefined
       && ticked.stage.finalPoofStartedAt !== undefined
+      && ticked.stage.finalFadeStartedAt !== undefined
       && ticked.stage.catchCount === 3
       && blocked.player.hop === undefined
       && panel.speaker === "B"
       && panel.text === "No! I ran out of road!";
   });
-  check("final ending transitions to post-victory tutorial and replay input resets", () => {
+  check("final ending fades to black and restarts from the beginning", () => {
     const state = simulation.createInitialState(riverIntroTown, 0, 0);
     let staged = {
       ...state,
@@ -815,17 +921,14 @@ try {
       },
     };
     staged = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
-    for (let index = 0; index < 360; index += 1) staged = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
-    const director = new dialogue.DialogueDirector();
-    const panel = director.update(undefined, staged, { editMode: false, cheatMode: false });
-    const reset = simulation.applyAction(staged, "forward");
-    return staged.stage.mode === "postVictoryTutorial"
-      && panel.speaker === "A"
-      && panel.text === "Hey there!\nI’m hungry for pancakes!"
-      && reset.runId === staged.runId + 1
-      && reset.stage.mode === "introPancakes"
-      && reset.stage.target.visible === false
-      && reset.score === 0;
+    const finalRunId = staged.runId;
+    const finalFadeAt = staged.stage.finalFadeStartedAt;
+    for (let index = 0; index < 380; index += 1) staged = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
+    return finalFadeAt !== undefined
+      && staged.runId === finalRunId + 1
+      && staged.stage.mode === "introPancakes"
+      && staged.stage.target.visible === false
+      && staged.score === 0;
   });
   check("cheat mode skips intro camera handoff", () => {
     const state = simulation.enterCheatMode(simulation.createInitialState(introFivePancakeTown, 0, 0));
@@ -947,6 +1050,28 @@ try {
     const state = simulation.createInitialState(trainIntroTown, 0, 0);
     const staged = { ...state, player: { x: 0, z: 4, maxZ: 4 } };
     return dialogue.terrainTagForState(staged, 5) === "MIXED_HARD";
+  });
+  check("landing on z13 triggers a hero relief comment", () => {
+    const state = simulation.createInitialState(stageMap.baselineStageMap(), 0, 0);
+    const staged = {
+      ...state,
+      phase: "running",
+      time: 30,
+      player: { ...state.player, z: 13, maxZ: 13 },
+      stage: {
+        ...state.stage,
+        mode: "chase",
+        catchCount: 1,
+        target: { ...state.stage.summonMarker, visible: true },
+        introCameraHandoffDone: true,
+      },
+    };
+    const ticked = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
+    const director = new dialogue.DialogueDirector();
+    const panel = director.update(staged, ticked, { editMode: false, cheatMode: false });
+    return ticked.stage.firstRiverClearedAt !== undefined
+      && panel?.eventType === "FIRST_RIVER_CLEARED"
+      && panel.speaker === "A";
   });
   check("applying a map can preserve the current edit position", () => {
     const state = simulation.createInitialState(longValidTown, 0, 0);

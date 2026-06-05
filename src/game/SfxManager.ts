@@ -66,8 +66,7 @@ export class SfxManager {
     if (options.cheatMode) return;
 
     if (
-      shouldPlayDesktopPickupSfx()
-      && next.collectedPancakes.size > previous.collectedPancakes.size
+      next.collectedPancakes.size > previous.collectedPancakes.size
       && next.time - this.lastPickupSoundAt >= PICKUP_MIN_INTERVAL_SECONDS
     ) {
       this.lastPickupSoundAt = next.time;
@@ -118,12 +117,18 @@ export class SfxManager {
     if (gameTime - this.lastDialogueBlipAt < 0.14) return;
     this.lastDialogueBlipAt = gameTime;
     if (speaker === "A") {
-      this.tone(520, 0.055, "triangle", 0.025, 0);
-      this.tone(690, 0.045, "sine", 0.018, 0.035);
+      this.tone(520, 0.055, "triangle", 0.042, 0);
+      this.tone(690, 0.045, "sine", 0.028, 0.035);
       return;
     }
-    this.tone(255, 0.065, "triangle", 0.026, 0);
-    this.tone(178, 0.055, "sine", 0.018, 0.04);
+    this.tone(255, 0.065, "triangle", 0.044, 0);
+    this.tone(178, 0.055, "sine", 0.03, 0.04);
+  }
+
+  playTutorialPickup(): void {
+    if (!this.enabled || !this.unlocked || !this.context) return;
+    if (this.playFileSfx("pickup")) return;
+    this.playPickupTone();
   }
 
   private playRevealSnap(): void {
@@ -142,7 +147,8 @@ export class SfxManager {
   }
 
   private playPickup(): void {
-    this.playFileSfx("pickup");
+    if (this.playFileSfx("pickup")) return;
+    this.playPickupTone();
   }
 
   private playRevealSnapTone(): void {
@@ -167,6 +173,12 @@ export class SfxManager {
     this.tone(330, 0.08, "triangle", 0.06, 0);
     this.tone(440, 0.08, "triangle", 0.06, 0.08);
     this.tone(660, 0.12, "triangle", 0.07, 0.16);
+  }
+
+  private playPickupTone(): void {
+    this.tone(520, 0.055, "square", 0.028, 0);
+    this.tone(780, 0.06, "triangle", 0.032, 0.055);
+    this.tone(1040, 0.075, "sine", 0.034, 0.115);
   }
 
   private tone(frequency: number, duration: number, type: OscillatorType, volume: number, delay: number): void {
@@ -208,27 +220,10 @@ export class SfxManager {
 
   private primeFileSfx(): void {
     for (const key of Object.keys(FILE_SFX_PATHS) as FileSfxKey[]) {
-      if (key === "pickup" && !shouldPlayDesktopPickupSfx()) continue;
       const player = this.getFilePlayer(key);
       if (!player) continue;
-      player.muted = true;
-      player.volume = 0;
-      const playback = player.play();
-      if (playback?.then) {
-        playback
-          .then(() => {
-            player.pause();
-            player.currentTime = 0;
-          })
-          .catch(() => undefined)
-          .finally(() => {
-            player.muted = false;
-            player.volume = FILE_SFX_VOLUME[key];
-          });
-      } else {
-        player.muted = false;
-        player.volume = FILE_SFX_VOLUME[key];
-      }
+      player.muted = false;
+      player.volume = FILE_SFX_VOLUME[key];
     }
   }
 
@@ -261,12 +256,6 @@ export class SfxManager {
     if (key === "reveal") this.playRevealSnapTone();
     else if (key === "escape") this.playEscapePopTone();
     else if (key === "crash") this.playCrashThumpTone();
+    else if (key === "pickup") this.playPickupTone();
   }
-}
-
-function shouldPlayDesktopPickupSfx(): boolean {
-  if (typeof window === "undefined" || !window.matchMedia) return true;
-  const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
-  const noHover = window.matchMedia("(hover: none)").matches;
-  return !coarsePointer && !noHover;
 }

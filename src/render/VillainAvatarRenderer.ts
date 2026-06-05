@@ -14,7 +14,7 @@ const PORTRAIT_CAMERA_Z = 4.62;
 const DEFAULT_VERTICAL_OFFSET = -0.08;
 const MAX_VERTICAL_TUNE = 0.12;
 const MAX_VERTICAL_INPUT = 100;
-const MIN_ZOOM_PERCENT = 75;
+const MIN_ZOOM_PERCENT = 55;
 const MAX_ZOOM_PERCENT = 160;
 const MODEL_TARGET_HEIGHT = 3.25;
 
@@ -25,12 +25,20 @@ export class VillainAvatarRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly loader = new GLTFLoader();
   private readonly resizeObserver: ResizeObserver;
+  private readonly models = new Map<string, THREE.Object3D>();
+  private readonly loadingModels = new Map<string, Promise<THREE.Object3D>>();
   private model?: THREE.Object3D;
+  private modelId?: string;
   private disposed = false;
   private loadToken = 0;
   private zoomPercent = 100;
   private verticalOffset = DEFAULT_VERTICAL_OFFSET;
   private pendingRender = false;
+  private firstReadyResolved = false;
+  private resolveFirstReady: () => void = () => undefined;
+  private readonly firstReadyPromise = new Promise<void>((resolve) => {
+    this.resolveFirstReady = resolve;
+  });
 
   constructor(private readonly container: HTMLElement, initialModel: AvatarModelDefinition) {
     this.renderer = new THREE.WebGLRenderer({
@@ -52,7 +60,7 @@ export class VillainAvatarRenderer {
 
     this.resizeObserver = new ResizeObserver(() => this.render());
     this.resizeObserver.observe(this.container);
-    this.setModel(initialModel);
+    void this.setModel(initialModel);
     this.render();
   }
 
@@ -60,7 +68,9 @@ export class VillainAvatarRenderer {
     this.disposed = true;
     this.resizeObserver.disconnect();
     this.renderer.dispose();
-    if (this.model) disposeObject(this.model);
+    for (const model of this.models.values()) disposeObject(model);
+    this.models.clear();
+    this.loadingModels.clear();
   }
 
   setFraming(options: { zoomPercent?: number; verticalOffsetPercent?: number }): void {
@@ -75,41 +85,96 @@ export class VillainAvatarRenderer {
     this.scheduleRender();
   }
 
-  setModel(modelDefinition: AvatarModelDefinition): void {
-    const token = ++this.loadToken;
-    this.container.classList.remove("is-loaded", "is-fallback");
-    if (this.model) {
-      this.portraitRoot.remove(this.model);
-      disposeObject(this.model);
-      this.model = undefined;
-    }
-    this.loadModel(modelDefinition, token);
-    this.scheduleRender();
+  preload(modelDefinition: AvatarModelDefinition): Promise<void> {
+    return this.ensureModel(modelDefinition)
+      .then(() => undefined)
+      .catch(() => undefined);
   }
 
-  private loadModel(modelDefinition: AvatarModelDefinition, token: number): void {
-    this.loader.load(
-      modelDefinition.path,
-      (gltf) => {
-        if (this.disposed || token !== this.loadToken) {
-          disposeObject(gltf.scene);
-          return;
+  isModelReady(modelId: string): boolean {
+    return this.models.has(modelId);
+  }
+
+  setModel(modelDefinition: AvatarModelDefinition): Promise<void> {
+    if (this.modelId === modelDefinition.id && this.model) {
+      this.container.classList.add("is-loaded");
+      this.scheduleRender();
+      return Promise.resolve();
+    }
+    const token = ++this.loadToken;
+    this.container.classList.remove("is-fallback");
+    if (!this.model) this.container.classList.remove("is-loaded");
+    const cachedModel = this.models.get(modelDefinition.id);
+    if (cachedModel) {
+      this.switchModel(modelDefinition.id, cachedModel, token);
+      return Promise.resolve();
+    }
+    this.scheduleRender();
+    return this.ensureModel(modelDefinition)
+      .then((nextModel) => {
+        if (!this.disposed && token === this.loadToken) this.switchModel(modelDefinition.id, nextModel, token);
+      })
+      .catch(() => {
+        if (!this.disposed && token === this.loadToken) {
+          if (!this.model) this.container.classList.add("is-fallback");
+          this.markFirstReady();
         }
-        const model = gltf.scene;
-        model.name = `${modelDefinition.id}_avatar`;
-        if (modelDefinition.id === "mr-not-so-awesome") enhanceMrNotSoAwesomeMaterials(model);
-        this.model = model;
-        normalizeHeadPortraitModel(model);
-        this.portraitRoot.add(model);
-        this.applyVerticalFrame();
-        this.container.classList.add("is-loaded");
-        this.render();
-      },
-      undefined,
-      () => {
-        if (!this.disposed && token === this.loadToken) this.container.classList.add("is-fallback");
-      },
-    );
+      });
+  }
+
+  whenReady(): Promise<void> {
+    return this.firstReadyPromise;
+  }
+
+  private ensureModel(modelDefinition: AvatarModelDefinition): Promise<THREE.Object3D> {
+    const existing = this.models.get(modelDefinition.id);
+    if (existing) return Promise.resolve(existing);
+    const loading = this.loadingModels.get(modelDefinition.id);
+    if (loading) return loading;
+    const nextLoading = new Promise<THREE.Object3D>((resolve, reject) => {
+      this.loader.load(
+        modelDefinition.path,
+        (gltf) => {
+          const nextModel = gltf.scene;
+          nextModel.name = `${modelDefinition.id}_avatar`;
+          if (modelDefinition.id === "mr-not-so-awesome") enhanceMrNotSoAwesomeMaterials(nextModel);
+          normalizeHeadPortraitModel(nextModel);
+          nextModel.visible = false;
+          this.models.set(modelDefinition.id, nextModel);
+          this.loadingModels.delete(modelDefinition.id);
+          resolve(nextModel);
+        },
+        undefined,
+        (error) => {
+          this.loadingModels.delete(modelDefinition.id);
+          reject(error);
+        },
+      );
+    });
+    this.loadingModels.set(modelDefinition.id, nextLoading);
+    return nextLoading;
+  }
+
+  private switchModel(modelId: string, nextModel: THREE.Object3D, token: number): void {
+    if (this.disposed || token !== this.loadToken) return;
+    if (this.model && this.model !== nextModel) {
+      this.model.visible = false;
+      this.portraitRoot.remove(this.model);
+    }
+    this.model = nextModel;
+    this.modelId = modelId;
+    nextModel.visible = true;
+    if (!this.portraitRoot.children.includes(nextModel)) this.portraitRoot.add(nextModel);
+    this.applyVerticalFrame();
+    this.container.classList.add("is-loaded");
+    this.markFirstReady();
+    this.render();
+  }
+
+  private markFirstReady(): void {
+    if (this.firstReadyResolved) return;
+    this.firstReadyResolved = true;
+    this.resolveFirstReady();
   }
 
   private render(): void {

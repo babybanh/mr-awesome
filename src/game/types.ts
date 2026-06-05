@@ -7,9 +7,9 @@ export const GRID = {
 } as const;
 
 export const PLAYER = {
-  hopDuration: 0.13,
-  inputBufferSeconds: 0.1,
-  hopArcHeight: 0.34,
+  hopDuration: 0.19,
+  inputBufferSeconds: 0.16,
+  hopArcHeight: 0.27,
   hitboxWidth: 0.58,
 } as const;
 
@@ -130,6 +130,7 @@ export interface StageRuntime {
   targetEscape?: GridPoint & { startedAt: number };
   targetPending?: GridPoint;
   targetRevealAt?: number;
+  autoTargetCatchCount: number;
   introCameraHandoffDone: boolean;
   introCameraHandoffStartedAt?: number;
   introCameraHandoffReleaseAt?: number;
@@ -137,7 +138,9 @@ export interface StageRuntime {
   finalStartedAt?: number;
   finalRescueStartedAt?: number;
   finalPoofStartedAt?: number;
+  finalFadeStartedAt?: number;
   postVictoryStartedAt?: number;
+  firstRiverClearedAt?: number;
   targetReachCompletesStage: boolean;
   lastEvent?: string;
 }
@@ -154,6 +157,7 @@ export interface HopState {
   toZ: number;
   elapsed: number;
   duration: number;
+  kind?: "move" | "hazardRecovery" | "summonBump";
 }
 
 export interface PlayerState extends GridPoint {

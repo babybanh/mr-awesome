@@ -160,13 +160,13 @@ z=413 G  | . . B1 b1 p1 . . . . B2 b2 b2 . |
 z=412 G  | . #3 b1 b1 . #3 . . #3 b2 b2 b2 . |
 z=411 G  | . . b1 b1 . . . . . b2 b2 b2 . |
 z=410 G  | . . . . . p1 . . . p1 . . . |
-z=409 W< | log=S speed=S gap=S |
-z=408 W> | log=M speed=S gap=M |
-z=407 W> | log=S speed=S gap=S |
+z=409 W> | log=M speed=S gap=S |
+z=408 W< | log=M speed=M gap=M |
+z=407 W> | log=L speed=S gap=S |
 z=406 D  | . #3 . . #3 . . p1 #3 . . #3 . |
 z=405 D  | . #4 . . . p1 . . . . . #4 . |
-z=404 W< | log=S speed=M gap=S |
-z=403 W< | log=M speed=M gap=M |
+z=404 W< | log=M speed=M gap=S |
+z=403 W> | log=L speed=M gap=M |
 z=402 W< | log=L speed=M gap=L |
 z=401 G  | . B1 b1 . . . p1 . . B2 b2 b2 . |
 z=400 G  | . b1 b1 . #4 . . . #4 b2 b2 b2 . |
@@ -293,7 +293,7 @@ z=280 W> | log=S speed=S gap=S |
 z=279 D  | . #4 . . . . . p1 . . . #4 . |
 z=278 G  | . #4 . . . p1 . . . . . #4 . |
 z=277 W< | log=S speed=M gap=S |
-z=276 W< | log=M speed=M gap=M |
+z=276 W> | log=M speed=M gap=M |
 z=275 W< | log=L speed=M gap=L |
 z=274 G  | . B1 b1 . . . p1 . . B2 b2 b2 . |
 z=273 G  | . b1 b1 . #4 . . . #4 b2 b2 b2 . |
@@ -346,7 +346,7 @@ z=227 D  | . p1 . . . . . p1 . b11 b11 . #5 |
 z=226 G  | . . #5 @2 @2 @2 @2 . #5 b11 b11 . . |
 z=225 D  | . . . . . . . . . p1 . . . |
 z=224 W< | log=S speed=S gap=S |
-z=223 W> | log=L speed=M gap=M |
+z=223 W> | log=M speed=S gap=M |
 z=222 W< | log=M speed=S gap=M |
 z=221 G  | #1 #1 B8 b8 #1 . . #1 B1 b1 . #1 #1 |
 z=220 G  | #1 #1 b8 b8 #1 . . #1 b1 b1 . #1 #1 |

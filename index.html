@@ -10,17 +10,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="The Awesome Superhero Game, a pancake-powered superhero chase for the Piano Inspires Kids Composition Contest." />
     <meta name="theme-color" content="#071017" />
-    <link rel="icon" type="image/png" href="/assets/meta/mr-awesome-icon.png" />
+    <link rel="icon" type="image/png" href="/assets/meta/mr-not-so-awesome-icon.png" />
     <link rel="apple-touch-icon" href="/assets/meta/apple-touch-icon.png" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="The Awesome Superhero Game" />
     <meta property="og:description" content="A pancake-powered superhero chase game." />
-    <meta property="og:image" content="/assets/meta/mr-awesome-preview.png" />
+    <meta property="og:image" content="/assets/meta/mr-not-so-awesome-app.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="The Awesome Superhero Game" />
     <meta name="twitter:description" content="A pancake-powered superhero chase game." />
-    <meta name="twitter:image" content="/assets/meta/mr-awesome-preview.png" />
+    <meta name="twitter:image" content="/assets/meta/mr-not-so-awesome-app.png" />
     <title>The Awesome Superhero Game</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #020506;
+      }
+
+      body:not(.app-ready) #app-shell {
+        visibility: hidden;
+      }
+    </style>
   </head>
   <body>
     <main id="app-shell">
@@ -79,18 +90,21 @@
             <button type="button" data-move="backward" class="dpad-button dpad-down" aria-label="Move backward">↓</button>
             <button type="button" data-move="right" class="dpad-button dpad-right" aria-label="Move right">→</button>
           </div>
-          <button class="music-trigger" type="button" data-music-toggle aria-label="Mute music" aria-pressed="true">
-            <svg class="sound-icon sound-icon-on" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3 9v6h4l5 4V5L7 9H3z"></path>
-              <path d="M16 8.5a5 5 0 0 1 0 7"></path>
-              <path d="M18.5 6a8.5 8.5 0 0 1 0 12"></path>
-            </svg>
-            <svg class="sound-icon sound-icon-off" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3 9v6h4l5 4V5L7 9H3z"></path>
-              <path d="M16 9l5 5"></path>
-              <path d="M21 9l-5 5"></path>
-            </svg>
-          </button>
+          <div class="utility-controls" aria-label="Game utility controls">
+            <button class="repeat-trigger" type="button" data-repeat-route aria-label="Repeat from Stage 1">↻</button>
+            <button class="music-trigger" type="button" data-music-toggle aria-label="Mute music" aria-pressed="true">
+              <svg class="sound-icon sound-icon-on" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 9v6h4l5 4V5L7 9H3z"></path>
+                <path d="M16 8.5a5 5 0 0 1 0 7"></path>
+                <path d="M18.5 6a8.5 8.5 0 0 1 0 12"></path>
+              </svg>
+              <svg class="sound-icon sound-icon-off" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 9v6h4l5 4V5L7 9H3z"></path>
+                <path d="M16 9l5 5"></path>
+                <path d="M21 9l-5 5"></path>
+              </svg>
+            </button>
+          </div>
         </footer>
 
         <div class="modal-overlay credits-modal" data-credits-modal hidden role="dialog" aria-modal="true" aria-label="Credits">
@@ -98,21 +112,18 @@
             <button class="modal-close" type="button" data-credits-close aria-label="Close credits">X</button>
             <h2 class="modal-title">The Awesome Superhero Game</h2>
             <section class="credits-copy" aria-label="Music and characters credit">
-              <span>Music and characters by</span>
-              <strong class="credits-name" data-credit-student-name>Adam</strong>
-              <a class="credits-link" data-credit-student-video target="_blank" rel="noopener noreferrer" aria-label="Watch Adam’s composition on YouTube">Watch video ▶</a>
+              <span class="credits-line">Music and characters by <strong class="credits-name" data-credit-student-name>Adam</strong></span>
+              <a class="credits-link" data-credit-student-video target="_blank" rel="noopener noreferrer" aria-label="Watch Adam’s performance on YouTube">Watch performance</a>
             </section>
             <section class="credits-copy" aria-label="Game design and development credit">
-              <span>Game created by</span>
-              <strong class="credits-name" data-credit-developer-name>Le Binh Anh Nguyen</strong>
-              <a class="credits-link" data-credit-developer-url target="_blank" rel="noopener noreferrer" aria-label="Visit Le Binh Anh Nguyen’s faculty page">Faculty page ↗</a>
+              <span class="credits-line">Game created by <strong class="credits-name" data-credit-developer-name>Le Binh Anh Nguyen</strong></span>
+              <a class="credits-link" data-credit-developer-url target="_blank" rel="noopener noreferrer" aria-label="Visit Le Binh Anh Nguyen’s website">Visit website</a>
             </section>
             <section class="credits-copy" aria-label="Contest credit">
-              <span>From the</span>
-              <strong class="credits-name" data-credit-contest-name>Piano Inspires Kids Composition Contest</strong>
+              <span class="credits-line">From the <strong class="credits-name" data-credit-contest-name>Piano Inspires Kids Composition Contest</strong></span>
               <div class="credits-link-row">
-                <a class="credits-link" data-credit-contest-playlist target="_blank" rel="noopener noreferrer" aria-label="Watch Piano Inspires Kids Composition Contest winners playlist on YouTube">Winners playlist ▶</a>
-                <a class="credits-link" data-credit-contest-magazine target="_blank" rel="noopener noreferrer" aria-label="Read the Piano Inspires Kids magazine">Magazine ↗</a>
+                <a class="credits-link" data-credit-contest-magazine target="_blank" rel="noopener noreferrer" aria-label="Read the Piano Inspires Kids magazine">Read the magazine</a>
+                <a class="credits-link" data-credit-contest-playlist target="_blank" rel="noopener noreferrer" aria-label="Watch Piano Inspires Kids Composition Contest winners playlist on YouTube">Watch winners playlist</a>
               </div>
             </section>
           </div>

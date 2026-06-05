@@ -187,7 +187,10 @@ export class MusicManager {
 
   private playRouteTheme(runId: number): void {
     if (this.routeStartedRunId === runId && this.tracks.routeTheme.playing) return;
-    if (this.routeStartedRunId === runId && this.routeEndedAt + ROUTE_THEME_LOOP_GAP_SECONDS > (this.lastState?.time ?? 0)) return;
+    const isPausedMidTrack = this.routeStartedRunId === runId
+      && this.routeEndedAt === Number.POSITIVE_INFINITY
+      && !this.tracks.routeTheme.playing;
+    if (!isPausedMidTrack && this.routeStartedRunId === runId && this.routeEndedAt + ROUTE_THEME_LOOP_GAP_SECONDS > (this.lastState?.time ?? 0)) return;
     this.routeStartedRunId = runId;
     this.routeEndedAt = Number.POSITIVE_INFINITY;
     this.playLoop("routeTheme");

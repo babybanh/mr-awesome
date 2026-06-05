@@ -234,6 +234,7 @@ export const DEFAULT_CAMERA_ZOOM_PERCENT = 150;
 const REVEAL_CAMERA_ZOOM_PERCENT = 150;
 const CHASE_CAMERA_ZOOM_PERCENT = 118;
 const CHASE_CAMERA_AHEAD_OFFSET_ROWS = 2.15;
+const CHASE_CAMERA_TOP_STOP_Z = 445;
 const ESCAPE_POP_SECONDS = 0.62;
 const DECORATIVE_LOG_SPEED_MULTIPLIER = 1.2;
 
@@ -319,14 +320,14 @@ export class ThreeStageRenderer {
       antialias: true,
       alpha: false,
       powerPreference: "high-performance",
-      preserveDrawingBuffer: true,
+      preserveDrawingBuffer: false,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.mobileRenderer ? 1.35 : 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.mobileRenderer ? 2 : 2.25));
     this.renderer.setClearColor(PALETTE.background);
     this.renderer.toneMapping = THREE.NoToneMapping;
     this.renderer.toneMappingExposure = 1;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.shadowMap.enabled = !this.mobileRenderer;
+    this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.container.appendChild(this.renderer.domElement);
 
@@ -335,9 +336,9 @@ export class ThreeStageRenderer {
     const fillLight = new THREE.DirectionalLight(0xfff0d2, 0.35);
     const rimLight = new THREE.DirectionalLight(0xc8e6ff, 0.18);
     sunLight.position.set(-5, 14, -6);
-    sunLight.castShadow = !this.mobileRenderer;
-    sunLight.shadow.mapSize.set(this.mobileRenderer ? 512 : 1024, this.mobileRenderer ? 512 : 1024);
-    sunLight.shadow.radius = 3.1;
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.set(this.mobileRenderer ? 1024 : 1536, this.mobileRenderer ? 1024 : 1536);
+    sunLight.shadow.radius = this.mobileRenderer ? 2.4 : 3;
     sunLight.shadow.camera.left = -16;
     sunLight.shadow.camera.right = 16;
     sunLight.shadow.camera.top = 20;
@@ -1110,8 +1111,8 @@ export class ThreeStageRenderer {
     enhanceLoadedAssetMaterials(key, source);
     source.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
-      object.castShadow = !this.mobileRenderer;
-      object.receiveShadow = !this.mobileRenderer;
+      object.castShadow = true;
+      object.receiveShadow = true;
     });
     source.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(source);
@@ -1165,7 +1166,8 @@ function targetCameraFocusX(playerX: number, state: GameState, useStageCamera: b
 
 function targetCameraFocusZ(playerZ: number, state: GameState, useStageCamera: boolean): number {
   const laneMaxZ = Math.max(...state.lanes.keys());
-  const topStopPlayerZ = Math.max(CAMERA_SPEC.bottomAnchorPlayerZ, laneMaxZ - CAMERA_SPEC.topBoundaryLeadRows);
+  const authoredTopStopZ = laneMaxZ - CAMERA_SPEC.topBoundaryLeadRows;
+  const topStopPlayerZ = Math.max(CAMERA_SPEC.bottomAnchorPlayerZ, Math.min(authoredTopStopZ, CHASE_CAMERA_TOP_STOP_Z));
   if (useStageCamera && state.stage.mode === "introPancakes") return rawCameraFocusZ(CAMERA_SPEC.bottomAnchorPlayerZ);
   if (useStageCamera && state.stage.mode === "summoning" && state.stage.target.visible) {
     return introRevealCameraFocusZ(state, topStopPlayerZ);
@@ -1213,7 +1215,8 @@ function introRevealCameraFocusZ(state: GameState, topStopPlayerZ: number): numb
 }
 
 function chaseCameraFocusZ(playerZ: number, topStopPlayerZ: number): number {
-  return rawCameraFocusZ(clamp(playerZ + CHASE_CAMERA_AHEAD_OFFSET_ROWS, CAMERA_SPEC.bottomAnchorPlayerZ, topStopPlayerZ));
+  const effectivePlayerZ = clamp(playerZ, CAMERA_SPEC.bottomAnchorPlayerZ, topStopPlayerZ);
+  return rawCameraFocusZ(effectivePlayerZ + CHASE_CAMERA_AHEAD_OFFSET_ROWS);
 }
 
 function stableQuarterTurn(x: number, z: number): number {
@@ -1268,7 +1271,7 @@ function defaultEscapeVisual(): EscapeVisual {
 }
 
 function finalTargetVisual(state: GameState): EscapeVisual | null {
-  if (state.stage.mode !== "finalSequence") return defaultEscapeVisual();
+  if (state.stage.mode !== "finalSequence") return targetNudgeVisual(state);
   if (state.stage.finalPoofStartedAt !== undefined && state.time >= state.stage.finalPoofStartedAt) {
     return escapeVisual(state.stage.finalPoofStartedAt, state.time, 0.23);
   }
@@ -1276,6 +1279,21 @@ function finalTargetVisual(state: GameState): EscapeVisual | null {
   const surpriseSeconds = Math.max(0, state.time - startedAt);
   const shake = surpriseSeconds < 1.2 ? Math.sin(surpriseSeconds * 48) * 0.035 : 0;
   return { ...defaultEscapeVisual(), zOffset: shake, scale: 1 + (surpriseSeconds < 0.5 ? Math.sin(surpriseSeconds * Math.PI * 4) * 0.035 : 0) };
+}
+
+function targetNudgeVisual(state: GameState): EscapeVisual {
+  if (state.stage.mode !== "chase" || !state.stage.target.visible || Math.round(state.player.z) <= state.stage.target.z) {
+    return defaultEscapeVisual();
+  }
+  const cycle = state.time % 2;
+  if (cycle > 0.42) return defaultEscapeVisual();
+  const pulse = Math.sin((cycle / 0.42) * Math.PI);
+  return {
+    yOffset: 0.03 * pulse,
+    zOffset: Math.sin(cycle * 80) * 0.045 * pulse,
+    scale: 1 + 0.055 * pulse,
+    opacity: 1,
+  };
 }
 
 function pancakeEscapeVisual(x: number, z: number, state: GameState): EscapeVisual | null {
@@ -1379,7 +1397,7 @@ function drawFittedText(
 }
 
 function enhanceLoadedAssetMaterials(key: ModelKey, source: THREE.Object3D): void {
-  if (key !== "target" && key !== "pancake") return;
+  if (key !== "player" && key !== "target" && key !== "pancake") return;
   const seen = new Set<THREE.Material>();
   source.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
@@ -1392,23 +1410,31 @@ function enhanceLoadedAssetMaterials(key: ModelKey, source: THREE.Object3D): voi
   });
 }
 
-function enhanceMaterialForAsset(key: "target" | "pancake", material: THREE.Material): void {
+function enhanceMaterialForAsset(key: "player" | "target" | "pancake", material: THREE.Material): void {
   const colorMaterial = material as THREE.Material & {
     color?: THREE.Color;
     emissive?: THREE.Color;
     emissiveIntensity?: number;
     roughness?: number;
+    map?: THREE.Texture | null;
   };
+  if (colorMaterial.map) {
+    colorMaterial.map.colorSpace = THREE.SRGBColorSpace;
+    colorMaterial.map.anisotropy = Math.max(colorMaterial.map.anisotropy, 8);
+    colorMaterial.map.magFilter = THREE.LinearFilter;
+    colorMaterial.map.minFilter = THREE.LinearMipmapLinearFilter;
+    colorMaterial.map.needsUpdate = true;
+  }
   if (colorMaterial.color) {
     if (key === "pancake") colorMaterial.color.offsetHSL(0.015, 0.16, 0.08);
-    else colorMaterial.color.offsetHSL(0, 0.08, 0.07);
+    else if (key === "target") colorMaterial.color.offsetHSL(0, 0.08, 0.07);
   }
   if (colorMaterial.emissive) {
     colorMaterial.emissive.set(0x000000);
     colorMaterial.emissiveIntensity = 0;
   }
   if (typeof colorMaterial.roughness === "number") {
-    colorMaterial.roughness = key === "pancake" ? Math.min(colorMaterial.roughness, 0.62) : Math.min(colorMaterial.roughness, 0.7);
+    colorMaterial.roughness = key === "pancake" ? Math.min(colorMaterial.roughness, 0.62) : Math.min(colorMaterial.roughness, 0.68);
   }
   material.needsUpdate = true;
 }
