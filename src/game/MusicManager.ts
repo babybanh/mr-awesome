@@ -32,7 +32,7 @@ const TRACKS: Record<MusicTrackId, { src: string; loop: boolean; volume: number 
 const VILLAIN_REVEAL_GAP_SECONDS = 1;
 const ROUTE_THEME_DELAY_SECONDS = 1;
 const ROUTE_THEME_LOOP_GAP_SECONDS = 0;
-const FINAL_THEME_SILENCE_SECONDS = 2;
+const FINAL_THEME_SILENCE_SECONDS = 3;
 
 export class MusicManager {
   private readonly tracks: Record<MusicTrackId, TrackState>;
