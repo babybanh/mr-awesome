@@ -408,15 +408,17 @@ try {
       && serialized.includes("z=462 W<")
       && serialized.includes("z=00 G");
   });
-  check("baseline multi-row river chunks are not all one direction", () => {
+  check("baseline multi-row river chunks alternate direction", () => {
     const result = stageMap.parseStageMap(stageMap.baselineStageMap());
     if (!result.ok || !result.stage) return false;
     const lanes = [...result.stage.lanes].sort((a, b) => a.z - b.z);
     let chunk = [];
     const flush = () => {
       if (chunk.length < 3) return true;
-      const firstDirection = chunk[0].direction;
-      return chunk.some((lane) => lane.direction !== firstDirection);
+      for (let index = 1; index < chunk.length; index += 1) {
+        if (chunk[index].direction === chunk[index - 1].direction) return false;
+      }
+      return true;
     };
     for (const lane of lanes) {
       const previous = chunk[chunk.length - 1];
@@ -529,6 +531,42 @@ try {
       && stageMap.serializeStageLane(result.stage, 8) === "z=08 T> | train=L speed=F gap=L warn=M |"
       && stageMap.serializeStageLane(result.stage, 6) === "z=06 W< | log=M speed=S gap=L |"
       && stageMap.serializeStageLane(result.stage, 5) === "z=05 R< | vehicle=S speed=S gap=L density=L cover=none |";
+  });
+  check("traffic tuning multipliers apply to road, river, and train lanes", () => {
+    const roadResult = stageMap.parseStageMap(introRoadTown);
+    const mediumRoadResult = stageMap.parseStageMap(introRoadTown.replace("vehicle=S speed=S", "vehicle=M speed=S"));
+    const riverResult = stageMap.parseStageMap(riverIntroTown);
+    const fastRiverResult = stageMap.parseStageMap(riverIntroTown.replace("log=M speed=S gap=L", "log=M speed=F gap=L"));
+    const trainResult = stageMap.parseStageMap(trainIntroTown);
+    const twoWayTrainResult = stageMap.parseStageMap(twoWayTrainTown);
+    const road = roadResult.stage?.lanes.get(1);
+    const mediumRoad = mediumRoadResult.stage?.lanes.get(1);
+    const river = riverResult.stage?.lanes.get(6);
+    const fastRiver = fastRiverResult.stage?.lanes.get(6);
+    const train = trainResult.stage?.lanes.get(8);
+    const slowTrain = twoWayTrainResult.stage?.lanes.get(7);
+    const mediumTrain = twoWayTrainResult.stage?.lanes.get(6);
+    return road?.kind === "road"
+      && mediumRoad?.kind === "road"
+      && river?.kind === "river"
+      && fastRiver?.kind === "river"
+      && train?.kind === "train"
+      && slowTrain?.kind === "train"
+      && mediumTrain?.kind === "train"
+      && approx(road.speed, 1.55 * 0.8 * 1.3)
+      && approx(road.gap, 5.8 * 1.7)
+      && approx(mediumRoad.speed, 1.55 * 0.8 * 1.3 * 1.15)
+      && approx(mediumRoad.gap, 5.8 * 1.7)
+      && approx(river.speed, 1.4 * 1.2 * 1.2 * 0.7)
+      && approx(river.gap, 7 * 0.56)
+      && approx(fastRiver.speed, 2.8 * 1.2 * 0.7)
+      && approx(fastRiver.gap, 7 * 0.56)
+      && approx(train.speed, 4.8 * 1.2 * 1.5)
+      && approx(train.gap, 9.2 * 2 * 1.2)
+      && approx(slowTrain.speed, 2.2 * 1.2 * 1.5)
+      && approx(slowTrain.gap, 4.8 * 2 * 1.2)
+      && approx(mediumTrain.speed, 3.4 * 1.2 * 1.5)
+      && approx(mediumTrain.gap, 6.8 * 2 * 1.2);
   });
   check("warning signs and billboards parse and serialize", () => {
     const result = stageMap.parseStageMap(trainIntroTown);
@@ -652,7 +690,9 @@ try {
   check("intro mode can move forward into road lanes", () => {
     const state = simulation.createInitialState(introRoadTown, 0, 0);
     const moved = simulation.applyAction(state, "forward");
-    return moved.player.hop?.toZ === 1 && moved.stage.mode === "introPancakes";
+    return moved.player.hop?.toZ === 1
+      && moved.stage.mode === "introPancakes"
+      && approx(moved.player.hop.duration, 0.19);
   });
   check("cheat mode bypasses intro river lock and moves three times faster", () => {
     const state = simulation.enterCheatMode(simulation.createInitialState(introBlockedRiverTown, 0, 0));
@@ -988,7 +1028,7 @@ try {
       && ticked.stage.catchCount === 3
       && blocked.player.hop === undefined
       && panel.speaker === "B"
-      && panel.text === "No! I ran out of road!";
+      && panel.text === "No! I forgot to build an exit!";
   });
   check("final ending fades to black and restarts from the beginning", () => {
     const state = simulation.createInitialState(riverIntroTown, 0, 0);
@@ -1288,6 +1328,10 @@ async function transpile(sourcePath, outName) {
 function check(name, predicate) {
   if (!predicate()) throw new Error(`Failed: ${name}`);
   console.log(`ok: ${name}`);
+}
+
+function approx(actual, expected, epsilon = 0.0001) {
+  return Math.abs(actual - expected) <= epsilon;
 }
 
 function tickUntilSettled(simulation, state, steps = 8) {

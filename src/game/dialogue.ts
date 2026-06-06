@@ -64,8 +64,8 @@ const SPEAKER_LABELS: Record<DialogueSpeaker, string> = {
 
 export const REVEAL_LINE_DURATIONS = [3.65, 3.3, 3.05] as const;
 export const REVEAL_TOTAL_SECONDS = REVEAL_LINE_DURATIONS.reduce((total, duration) => total + duration, 0);
-export const FINAL_LINE_DURATIONS = [3.4, 3.1, 3.8, 3.4] as const;
-const FINAL_LINE_GAP_SECONDS = 0.65;
+export const FINAL_LINE_DURATIONS = [3.0, 2.7, 3.7, 3.4] as const;
+const FINAL_LINE_GAP_SECONDS = 0.4;
 
 const REVEAL_SEQUENCE: readonly DialogueLine[] = [
   line("B", "Thanks for the pancakes. I trapped your friends too!", 100, "VILLAIN_REVEAL", 3.65),
@@ -74,10 +74,10 @@ const REVEAL_SEQUENCE: readonly DialogueLine[] = [
 ];
 
 const FINAL_SEQUENCE: readonly DialogueLine[] = [
-  line("B", "No! I ran out of road!", 110, "FINAL_ENDING", 3.4),
-  line("A", "Then give back my friends!", 110, "FINAL_ENDING", 3.1),
-  line("B", "Fine! They’re safe. Pancakes too!", 110, "FINAL_ENDING", 3.8),
-  line("A", "Pancakes for everybody!", 110, "FINAL_ENDING", 3.4, "success"),
+  line("B", "No! I forgot to build an exit!", 110, "FINAL_ENDING", 3.0),
+  line("A", "Your villain days are over!", 110, "FINAL_ENDING", 2.7),
+  line("B", "Fine! Your friends are free. Even the pancakes!", 110, "FINAL_ENDING", 3.7),
+  line("A", "Heroes together, pancakes forever!", 110, "FINAL_ENDING", 3.4, "success"),
 ];
 
 const OPENING_TUTORIAL_LINES = [

@@ -142,9 +142,9 @@ z=431 D  | . #3 . . . . . . . b10 b10 b10 #3 |
 z=430 W< | log=S speed=S gap=S |
 z=429 W> | log=M speed=M gap=M |
 z=428 W< | log=M speed=F gap=M |
-z=427 W< | log=S speed=F gap=S |
-z=426 W> | log=M speed=M gap=M |
-z=425 W< | log=M speed=S gap=M |
+z=427 W> | log=S speed=F gap=S |
+z=426 W< | log=M speed=M gap=M |
+z=425 W> | log=M speed=S gap=M |
 z=424 G  | . . B6 b6 . . . . B8 b8 . . . |
 z=423 G  | #3 . b6 b6 . . . . b8 b8 . #3 . |
 z=422 G  | . . b6 b6 . p1 . p1 b8 b8 . . . |
@@ -251,8 +251,8 @@ z=322 D  | #5 . . b6 b6 #5 p1 . b8 b8 . . #5 |
 z=321 G  | . #5 . b6 b6 . . . b8 b8 . #5 . |
 z=320 D  | . . . . p1 . . . p1 . . . . |
 z=319 W> | log=L speed=M gap=S |
-z=318 W> | log=M speed=S gap=S |
-z=317 W< | log=S speed=F gap=L |
+z=318 W< | log=M speed=S gap=S |
+z=317 W> | log=S speed=F gap=L |
 z=316 W< | log=M speed=S gap=S |
 z=315 G  | #5 . . . . p1 . #5 . . #5 . . |
 z=314 G  | . #5 @1 @1 @1 . . . . p1 . #5 . |
@@ -289,7 +289,7 @@ z=284 D  | #4 b5 b5 b5 . #4 b8 b8 #4 b1 b1 #4 . |
 z=283 G  | . . . . p1 . . . p1 . . . . |
 z=282 W< | log=S speed=S gap=S |
 z=281 W> | log=M speed=S gap=M |
-z=280 W> | log=S speed=S gap=S |
+z=280 W< | log=S speed=S gap=S |
 z=279 D  | . #4 . . . . . p1 . . . #4 . |
 z=278 G  | . #4 . . . p1 . . . . . #4 . |
 z=277 W< | log=S speed=M gap=S |
@@ -1078,11 +1078,22 @@ function grassLane(z: number, terrain: GroundTerrain = "grass"): LaneState {
   };
 }
 
+const ROAD_SPEED_MULTIPLIER = 0.8 * 1.3;
+const ROAD_MEDIUM_VEHICLE_SPEED_MULTIPLIER = 1.15;
+const ROAD_GAP_MULTIPLIER = 1.7;
+const RIVER_SPEED_MULTIPLIER = 1.2 * 1.2 * 0.7;
+const RIVER_FAST_SPEED_MULTIPLIER = 1.2 * 0.7;
+const RIVER_GAP_MULTIPLIER = 0.56;
+const TRAIN_SPEED_MULTIPLIER = 1.2 * 1.5;
+const TRAIN_GAP_MULTIPLIER = 2 * 1.2;
+
 function roadLane(z: number, direction: Direction, road: RoadTuning): LaneState {
-  const speed = (road.speedCode === "F" ? 3.25 : road.speedCode === "M" ? 2.35 : 1.55) * 0.8;
+  const speed = (road.speedCode === "F" ? 3.25 : road.speedCode === "M" ? 2.35 : 1.55)
+    * ROAD_SPEED_MULTIPLIER
+    * (road.vehicleSize === "M" ? ROAD_MEDIUM_VEHICLE_SPEED_MULTIPLIER : 1);
   const baseGap = road.gapCode === "S" ? 3.4 : road.gapCode === "M" ? 4.5 : 5.8;
   const densityFactor = road.densityCode === "H" ? 0.66 : road.densityCode === "M" ? 0.82 : 1;
-  const gap = baseGap * densityFactor;
+  const gap = baseGap * densityFactor * ROAD_GAP_MULTIPLIER;
   const length = road.vehicleSize === "L" ? 3.3 : road.vehicleSize === "M" ? 2.2 : 1.35;
   return {
     z,
@@ -1100,8 +1111,9 @@ function roadLane(z: number, direction: Direction, road: RoadTuning): LaneState 
 }
 
 function riverLane(z: number, direction: Direction, river: RiverTuning): LaneState {
-  const speed = (river.speedCode === "F" ? 2.8 : river.speedCode === "M" ? 2 : 1.4) * 1.2;
-  const gap = river.gapCode === "S" ? 3.4 : river.gapCode === "L" ? 7 : 5;
+  const speed = (river.speedCode === "F" ? 2.8 : river.speedCode === "M" ? 2 : 1.4)
+    * (river.speedCode === "F" ? RIVER_FAST_SPEED_MULTIPLIER : RIVER_SPEED_MULTIPLIER);
+  const gap = (river.gapCode === "S" ? 3.4 : river.gapCode === "L" ? 7 : 5) * RIVER_GAP_MULTIPLIER;
   const length = river.logSize === "L" ? 4.4 : river.logSize === "S" ? 1.85 : 3;
   return {
     z,
@@ -1119,8 +1131,9 @@ function riverLane(z: number, direction: Direction, river: RiverTuning): LaneSta
 }
 
 function trainLane(z: number, direction: Direction, train: TrainTuning): LaneState {
-  const speed = (train.speedCode === "F" ? 4.8 : train.speedCode === "M" ? 3.4 : 2.2) * 1.2;
-  const gap = train.gapCode === "S" ? 4.8 : train.gapCode === "M" ? 6.8 : 9.2;
+  const speed = (train.speedCode === "F" ? 4.8 : train.speedCode === "M" ? 3.4 : 2.2)
+    * TRAIN_SPEED_MULTIPLIER;
+  const gap = (train.gapCode === "S" ? 4.8 : train.gapCode === "M" ? 6.8 : 9.2) * TRAIN_GAP_MULTIPLIER;
   const length = train.trainSize === "L" ? 6.2 : train.trainSize === "M" ? 4.6 : 3.1;
   return {
     z,

@@ -32,6 +32,7 @@ const TRACKS: Record<MusicTrackId, { src: string; loop: boolean; volume: number 
 const VILLAIN_REVEAL_GAP_SECONDS = 1;
 const ROUTE_THEME_DELAY_SECONDS = 1;
 const ROUTE_THEME_LOOP_GAP_SECONDS = 0;
+const FINAL_THEME_SILENCE_SECONDS = 2;
 
 export class MusicManager {
   private readonly tracks: Record<MusicTrackId, TrackState>;
@@ -40,6 +41,9 @@ export class MusicManager {
   private lastRunId = -1;
   private villainStartedRunId: number | undefined;
   private villainScheduledRunId: number | undefined;
+  private finalVillainStartedRunId: number | undefined;
+  private finalVillainScheduledRunId: number | undefined;
+  private finalVillainStartAt = Number.POSITIVE_INFINITY;
   private villainStartAt = Number.POSITIVE_INFINITY;
   private villainEndedAt = Number.POSITIVE_INFINITY;
   private routeStartedRunId: number | undefined;
@@ -87,6 +91,9 @@ export class MusicManager {
       this.routeStartedRunId = undefined;
       this.villainStartedRunId = undefined;
       this.villainScheduledRunId = undefined;
+      this.finalVillainStartedRunId = undefined;
+      this.finalVillainScheduledRunId = undefined;
+      this.finalVillainStartAt = Number.POSITIVE_INFINITY;
       this.villainStartAt = Number.POSITIVE_INFINITY;
       this.villainEndedAt = Number.POSITIVE_INFINITY;
       this.routeEndedAt = Number.POSITIVE_INFINITY;
@@ -122,6 +129,27 @@ export class MusicManager {
         return;
       }
       if (this.villainEndedAt + ROUTE_THEME_DELAY_SECONDS <= state.time) this.playRouteTheme(state.runId);
+      return;
+    }
+
+    if (state.stage.mode === "finalSequence") {
+      const finalStartedAt = state.stage.finalStartedAt ?? state.time;
+      if (this.finalVillainScheduledRunId !== state.runId) {
+        this.finalVillainScheduledRunId = state.runId;
+        this.finalVillainStartedRunId = undefined;
+        this.finalVillainStartAt = finalStartedAt + FINAL_THEME_SILENCE_SECONDS;
+        this.stopTrack("heroIntro");
+        this.stopTrack("routeTheme");
+        this.stopTrack("villainReveal");
+      }
+      if (state.time < this.finalVillainStartAt) return;
+      if (this.finalVillainStartedRunId !== state.runId) {
+        this.playFinalVillainTheme(state.runId);
+        return;
+      }
+      if (this.villainEndedAt === Number.POSITIVE_INFINITY && !this.tracks.villainReveal.playing) {
+        this.resumeOnce("villainReveal");
+      }
     }
   }
 
@@ -152,6 +180,9 @@ export class MusicManager {
     this.lastRunId = runId;
     this.villainStartedRunId = undefined;
     this.villainScheduledRunId = undefined;
+    this.finalVillainStartedRunId = undefined;
+    this.finalVillainScheduledRunId = undefined;
+    this.finalVillainStartAt = Number.POSITIVE_INFINITY;
     this.villainStartAt = Number.POSITIVE_INFINITY;
     this.routeStartedRunId = undefined;
     this.villainEndedAt = Number.POSITIVE_INFINITY;
@@ -203,12 +234,24 @@ export class MusicManager {
     this.playOnce("villainReveal");
   }
 
+  private playFinalVillainTheme(runId: number): void {
+    this.finalVillainStartedRunId = runId;
+    this.playOnce("villainReveal");
+  }
+
   private playOnce(id: "villainReveal"): void {
     const track = this.tracks[id];
     track.audio.loop = false;
     track.audio.currentTime = 0;
     track.audio.volume = TRACKS[id].volume;
     this.villainEndedAt = Number.POSITIVE_INFINITY;
+    void this.safePlay(id);
+  }
+
+  private resumeOnce(id: "villainReveal"): void {
+    const track = this.tracks[id];
+    track.audio.loop = false;
+    track.audio.volume = TRACKS[id].volume;
     void this.safePlay(id);
   }
 
