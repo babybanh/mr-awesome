@@ -663,24 +663,24 @@ export class DialogueDirector {
     }
 
     if (state.stage.mode === "introPancakes" && state.collectedPancakes.size > previous.collectedPancakes.size) {
-      const previousIntroCount = countIntroPancakes(previous);
       const introCount = countIntroPancakes(state);
-      if (introCount <= 1) return undefined;
-      if (introCount >= 4) {
+      if (introCount === 1) {
+        return this.pickLine("A", PANCAKE_LINES, 20, "PANCAKE_COLLECTED", state, {
+          tone: "neutral",
+          duration: 2.2,
+          cooldownKey: "pancake-first",
+          cooldownSeconds: 60,
+        });
+      }
+      if (introCount === 3) {
         return this.pickLine("A", PANCAKE_ALMOST_LINES, 30, "PANCAKES_4_OF_5", state, {
           tone: "instruction",
           duration: 3.1,
-          cooldownKey: "pancake",
-          cooldownSeconds: 3.2,
+          cooldownKey: "pancake-third",
+          cooldownSeconds: 60,
         });
       }
-      if (previousIntroCount < 1) return undefined;
-      return this.pickLine("A", PANCAKE_LINES, 20, "PANCAKE_COLLECTED", state, {
-        tone: "neutral",
-        duration: 2.2,
-        cooldownKey: "pancake",
-        cooldownSeconds: 4.5,
-      });
+      return undefined;
     }
 
     return undefined;
@@ -693,12 +693,7 @@ export class DialogueDirector {
     this.nextAmbientAttemptAt = state.time + 4 + seededUnit(state) * 3;
 
     if (state.stage.mode === "introPancakes") {
-      return this.pickLine("A", PANCAKE_LINES, 10, "PANCAKE_COLLECTED", state, {
-        tone: "neutral",
-        duration: 3.0,
-        cooldownKey: "intro-ambient",
-        cooldownSeconds: 4.5,
-      });
+      return undefined;
     }
 
     if (state.stage.mode === "summoning") return undefined;

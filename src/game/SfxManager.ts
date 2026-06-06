@@ -17,8 +17,8 @@ const FILE_SFX_PATHS: Record<FileSfxKey, string> = {
 
 const FILE_SFX_VOLUME: Record<FileSfxKey, number> = {
   reveal: 0.36,
-  escape: 0.36,
-  crash: 0.36,
+  escape: 0.24,
+  crash: 0.12,
   pickup: 0.48,
 };
 const PICKUP_MIN_INTERVAL_SECONDS = 0.11;
@@ -158,15 +158,15 @@ export class SfxManager {
   }
 
   private playEscapePopTone(): void {
-    this.tone(218, 0.08, "triangle", 0.04, 0);
-    this.tone(330, 0.1, "sine", 0.038, 0.055);
-    this.noise(0.07, 0.026, 0.02, "bandpass");
+    this.tone(218, 0.08, "triangle", 0.028, 0);
+    this.tone(330, 0.1, "sine", 0.026, 0.055);
+    this.noise(0.07, 0.018, 0.02, "bandpass");
   }
 
   private playCrashThumpTone(): void {
-    this.tone(74, 0.13, "triangle", 0.07, 0);
-    this.tone(46, 0.18, "sine", 0.06, 0.04);
-    this.noise(0.11, 0.048, 0, "lowpass");
+    this.tone(74, 0.13, "triangle", 0.024, 0);
+    this.tone(46, 0.18, "sine", 0.021, 0.04);
+    this.noise(0.11, 0.016, 0, "lowpass");
   }
 
   private playRouteCue(): void {

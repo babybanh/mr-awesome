@@ -109,16 +109,21 @@ const AVATAR_BACKGROUND_OPTIONS = [
   { id: "stone", label: "Stone" },
   { id: "black", label: "Black" },
 ] as const;
+const USE_MOBILE_CHARACTER_ASSETS = window.matchMedia("(pointer: coarse), (max-width: 820px), (max-height: 760px)").matches;
 const AVATAR_CHARACTER_OPTIONS = [
   {
     id: "mr-not-so-awesome",
     label: "Mr. Not So Awesome",
-    path: "/assets/characters/MrNotSoAwesomeTexturedBright.glb",
+    path: USE_MOBILE_CHARACTER_ASSETS
+      ? "/assets/characters/MrNotSoAwesomeTexturedBright-mobile.glb"
+      : "/assets/characters/MrNotSoAwesomeTexturedBright.glb",
   },
   {
     id: "mr-awesome",
     label: "Mr. Awesome",
-    path: "/assets/characters/TexturedMeshBright.glb",
+    path: USE_MOBILE_CHARACTER_ASSETS
+      ? "/assets/characters/TexturedMeshBright-mobile.glb"
+      : "/assets/characters/TexturedMeshBright.glb",
   },
 ] as const satisfies readonly AvatarModelDefinition[];
 type ControlStyleId = (typeof CONTROL_STYLE_OPTIONS)[number]["id"];
@@ -157,7 +162,7 @@ const avatarBox = requireElement("[data-villain-avatar]");
 avatarBox.dataset.avatarPortrait = storedAvatarState.characterId;
 composition.classList.add("is-booting");
 const renderer = new ThreeStageRenderer(gameView);
-const villainAvatar = new VillainAvatarRenderer(avatarBox, avatarOptionById(storedAvatarState.characterId));
+const villainAvatar = new VillainAvatarRenderer(avatarBox, avatarOptionById(storedAvatarState.characterId), { deferInitialLoad: true });
 const dialogueDirector = new DialogueDirector();
 const music = new MusicManager();
 const sfx = new SfxManager();
@@ -205,6 +210,7 @@ let openingTutorialFinishTimer: number | undefined;
 let debugControlsVisible = false;
 let observedRunId = state.runId;
 let bootReady = false;
+let avatarWarmStarted = false;
 
 const elements = {
   dialogueStrip: requireElement<HTMLElement>(".dialogue-strip"),
@@ -1271,7 +1277,6 @@ function updateUi(): void {
       void elements.dialogueStrip.offsetWidth;
       elements.dialogueStrip.classList.add("is-dialogue-entering");
     }
-    if (!isOpeningTutorialDialogue) sfx.playDialogueBlip(nextDialogue.speaker, state.time);
     lastDialogueKey = nextDialogueKey;
   }
 }
@@ -1387,11 +1392,11 @@ function startBootReadiness(): void {
   const openingAssets = Array.from(document.querySelectorAll<HTMLImageElement>(".opening-tutorial-asset"))
     .map((image) => waitForImage(image));
   const fontReady = document.fonts?.ready ?? Promise.resolve();
-  const avatarAssets = AVATAR_CHARACTER_OPTIONS.map((option) => villainAvatar.preload(option));
   const revealAssets = () => {
     bootPhase = "assets";
     composition.classList.remove("is-booting");
     updateUi();
+    warmAvatarAssetsSoon();
     if (bootQuietTimer !== undefined) window.clearTimeout(bootQuietTimer);
     bootQuietTimer = window.setTimeout(() => {
       bootQuietTimer = undefined;
@@ -1402,9 +1407,28 @@ function startBootReadiness(): void {
       updateUi();
     }, 1000);
   };
-  Promise.allSettled([...openingAssets, ...avatarAssets, villainAvatar.whenReady(), fontReady])
+  Promise.allSettled([...openingAssets, fontReady])
     .then(revealAssets)
     .catch(revealAssets);
+}
+
+function warmAvatarAssetsSoon(): void {
+  if (avatarWarmStarted) return;
+  avatarWarmStarted = true;
+  const warm = () => {
+    void villainAvatar.setModel(avatarOptionById(avatarCharacterId));
+    for (const option of AVATAR_CHARACTER_OPTIONS) {
+      if (option.id !== avatarCharacterId) void villainAvatar.preload(option);
+    }
+  };
+  const requestIdle = (window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+  }).requestIdleCallback;
+  if (requestIdle) {
+    requestIdle(warm, { timeout: 1400 });
+    return;
+  }
+  globalThis.setTimeout(warm, 250);
 }
 
 function waitForImage(image: HTMLImageElement): Promise<void> {

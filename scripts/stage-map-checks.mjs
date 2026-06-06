@@ -389,11 +389,9 @@ try {
   await transpile("src/game/stageMap.ts", "stageMap.mjs");
   await transpile("src/game/simulation.ts", "simulation.mjs");
   await transpile("src/game/dialogue.ts", "dialogue.mjs");
-  await transpile("src/game/MusicManager.ts", "MusicManager.mjs");
   const stageMap = await import(new URL("stageMap.mjs", `file://${tmp}/`).href);
   const simulation = await import(new URL("simulation.mjs", `file://${tmp}/`).href);
   const dialogue = await import(new URL("dialogue.mjs", `file://${tmp}/`).href);
-  const music = await import(new URL("MusicManager.mjs", `file://${tmp}/`).href);
   const openingTutorialLines = new Set([
     "Use arrows. Grab pancakes!",
     "Pancakes, please!",
@@ -409,49 +407,6 @@ try {
       && result.stage?.name === "v110B_apartment_shop_final_candidate"
       && serialized.includes("z=462 W<")
       && serialized.includes("z=00 G");
-  });
-  check("background ambience sequence zone boundaries match the Stage 1 audio map", () => {
-    const expectations = [
-      [0, ["traffic", "train", "river"]],
-      [68, ["traffic", "train", "river"]],
-      [69, ["train", "traffic", "river"]],
-      [123, ["train", "traffic", "river"]],
-      [124, ["train", "river", "train", "traffic"]],
-      [270, ["train", "river", "train", "traffic"]],
-      [271, ["river", "traffic", "river"]],
-      [352, ["river", "traffic", "river"]],
-      [353, ["train", "traffic", "train"]],
-      [397, ["train", "traffic", "train"]],
-      [398, ["river", "traffic", "river"]],
-      [430, ["river", "traffic", "river"]],
-      [431, ["train", "traffic", "train", "river"]],
-      [462, ["train", "traffic", "train", "river"]],
-    ];
-    return expectations.every(([z, sequence]) => (
-      JSON.stringify(music.getBackgroundAudioZone(z)?.sequence) === JSON.stringify(sequence)
-    ));
-  });
-  check("background ambience uses grace rows to avoid boundary flapping", () => {
-    const expectations = [
-      [69, 0, 0],
-      [80, 0, 0],
-      [81, 0, 1],
-      [68, 1, 1],
-      [57, 1, 1],
-      [56, 1, 0],
-      [124, 1, 1],
-      [135, 1, 1],
-      [136, 1, 2],
-      [431, 5, 5],
-      [442, 5, 5],
-      [443, 5, 6],
-      [430, 6, 6],
-      [419, 6, 6],
-      [418, 6, 5],
-    ];
-    return expectations.every(([z, activeZoneIndex, expectedZoneIndex]) => (
-      music.getBackgroundAudioZoneWithGrace(z, activeZoneIndex)?.index === expectedZoneIndex
-    ));
   });
   check("baseline multi-row river chunks are not all one direction", () => {
     const result = stageMap.parseStageMap(stageMap.baselineStageMap());

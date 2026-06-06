@@ -5,9 +5,15 @@ import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { GRID, type GameState, type GridPoint, type LaneState, type StageAssetId, type StageObjectKind, type StagePlacedObject } from "../game/types";
 import { getMovingSpans, getPlayerDisplayPosition, isTrainWarningActive, pancakeKey } from "../game/simulation";
 
+const USE_MOBILE_CHARACTER_ASSETS = window.matchMedia("(pointer: coarse), (max-width: 820px), (max-height: 760px)").matches;
+
 const ASSET_PATHS = {
-  player: "/assets/characters/TexturedMeshBright.glb",
-  target: "/assets/characters/MrNotSoAwesomeTexturedBright.glb",
+  player: USE_MOBILE_CHARACTER_ASSETS
+    ? "/assets/characters/TexturedMeshBright-mobile.glb"
+    : "/assets/characters/TexturedMeshBright.glb",
+  target: USE_MOBILE_CHARACTER_ASSETS
+    ? "/assets/characters/MrNotSoAwesomeTexturedBright-mobile.glb"
+    : "/assets/characters/MrNotSoAwesomeTexturedBright.glb",
   pancake: "/assets/collectibles/PancakeTexturedBright.glb",
   house01: {
     obj: "/assets/voxel-town-set/Houses/House01/House01.obj",
@@ -1045,8 +1051,8 @@ export class ThreeStageRenderer {
 
   private loadInitialAssets(): void {
     this.loadModel("player");
-    this.loadModel("target");
-    this.loadModel("pancake");
+    window.setTimeout(() => this.loadModel("target"), 260);
+    window.setTimeout(() => this.loadModel("pancake"), 620);
   }
 
   private loadModel(key: ModelKey): void {

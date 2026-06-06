@@ -40,7 +40,11 @@ export class VillainAvatarRenderer {
     this.resolveFirstReady = resolve;
   });
 
-  constructor(private readonly container: HTMLElement, initialModel: AvatarModelDefinition) {
+  constructor(
+    private readonly container: HTMLElement,
+    initialModel: AvatarModelDefinition,
+    options: { deferInitialLoad?: boolean } = {},
+  ) {
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
@@ -60,7 +64,8 @@ export class VillainAvatarRenderer {
 
     this.resizeObserver = new ResizeObserver(() => this.render());
     this.resizeObserver.observe(this.container);
-    void this.setModel(initialModel);
+    if (options.deferInitialLoad) this.markFirstReady();
+    else void this.setModel(initialModel);
     this.render();
   }
 
