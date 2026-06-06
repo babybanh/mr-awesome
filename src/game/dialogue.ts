@@ -6,6 +6,7 @@ export type DialogueEventType =
   | "OPENING_TUTORIAL"
   | "PANCAKE_COLLECTED"
   | "PANCAKES_4_OF_5"
+  | "PANCAKE_REMINDER"
   | "VILLAIN_REVEAL"
   | "FIRST_CATCH_HANDOFF"
   | "TARGET_CAUGHT"
@@ -105,6 +106,15 @@ const PANCAKE_ALMOST_LINES = [
   "Last pancake coming up!",
   "My friends will be so happy!",
 ] as const;
+
+const PANCAKE_REMINDER_LINES = [
+  "More pancakes, please!",
+  "I'm still hungry for pancakes...",
+] as const;
+
+const PANCAKE_REMINDER_MIN_COUNT = 3;
+const PANCAKE_REMINDER_MAX_COUNT = 4;
+const PANCAKE_REMINDER_INTERVAL_SECONDS = 8;
 
 const FIRST_CATCH_LINES = [
   "Nice try, hero. Now the real chase starts!",
@@ -563,10 +573,14 @@ export class DialogueDirector {
   private sameSpeakerCatchStreak = 0;
   private recentCatchTexts: string[] = [];
   private suppressAmbientUntil = 0;
+  private introPancakeReminderCount: number | undefined;
+  private nextIntroPancakeReminderAt = Number.POSITIVE_INFINITY;
+  private nextIntroPancakeReminderIndex = 0;
 
   update(previous: GameState | undefined, state: GameState, options: DialogueOptions): DialoguePanel | undefined {
     if (state.runId !== this.lastRunId) this.reset(state.runId);
     this.trackTargetRespawn(previous, state);
+    this.trackIntroPancakeReminder(state);
 
     const finalPanel = finalSequencePanel(state);
     if (finalPanel) {
@@ -627,6 +641,9 @@ export class DialogueDirector {
     this.sameSpeakerCatchStreak = 0;
     this.recentCatchTexts = [];
     this.suppressAmbientUntil = 0;
+    this.introPancakeReminderCount = undefined;
+    this.nextIntroPancakeReminderAt = Number.POSITIVE_INFINITY;
+    this.nextIntroPancakeReminderIndex = 0;
   }
 
   private eventLine(previous: GameState | undefined, state: GameState): DialogueLine | undefined {
@@ -689,15 +706,17 @@ export class DialogueDirector {
   private ambientLine(state: GameState): DialogueLine | undefined {
     if (state.phase !== "running" || isDangerLane(state) || isRevealSuppressed(state)) return undefined;
     if (state.time < this.suppressAmbientUntil) return undefined;
+
+    if (state.stage.mode === "introPancakes") {
+      return this.introPancakeReminderLine(state);
+    }
+
     if (state.time < this.nextAmbientAttemptAt) return undefined;
     this.nextAmbientAttemptAt = state.time + 4 + seededUnit(state) * 3;
 
-    if (state.stage.mode === "introPancakes") {
-      return undefined;
-    }
-
     if (state.stage.mode === "summoning") return undefined;
     if (state.stage.mode !== "chase") return undefined;
+    if (state.stage.catchCount < 1) return undefined;
 
     const obstacle = firstUnseenObstacleAhead(state, this.oneShots);
     if (obstacle) {
@@ -773,6 +792,35 @@ export class DialogueDirector {
       && state.stage.target.visible
       && (previous.stage.target.x !== state.stage.target.x || previous.stage.target.z !== state.stage.target.z);
     if (targetBecameVisible || targetMovedWhileVisible) this.lastTargetRespawnTime = state.time;
+  }
+
+  private trackIntroPancakeReminder(state: GameState): void {
+    if (state.stage.mode !== "introPancakes") {
+      if (this.active?.eventType === "PANCAKE_REMINDER") this.active = undefined;
+      this.introPancakeReminderCount = undefined;
+      this.nextIntroPancakeReminderAt = Number.POSITIVE_INFINITY;
+      return;
+    }
+    const introCount = countIntroPancakes(state);
+    if (introCount < PANCAKE_REMINDER_MIN_COUNT || introCount > PANCAKE_REMINDER_MAX_COUNT) {
+      if (this.active?.eventType === "PANCAKE_REMINDER") this.active = undefined;
+      this.introPancakeReminderCount = undefined;
+      this.nextIntroPancakeReminderAt = Number.POSITIVE_INFINITY;
+      return;
+    }
+    if (this.introPancakeReminderCount === introCount) return;
+    if (this.active?.eventType === "PANCAKE_REMINDER") this.active = undefined;
+    this.introPancakeReminderCount = introCount;
+    this.nextIntroPancakeReminderAt = state.time + PANCAKE_REMINDER_INTERVAL_SECONDS;
+    this.nextIntroPancakeReminderIndex = Math.floor(seededUnit(state) * PANCAKE_REMINDER_LINES.length) % PANCAKE_REMINDER_LINES.length;
+  }
+
+  private introPancakeReminderLine(state: GameState): DialogueLine | undefined {
+    if (this.introPancakeReminderCount === undefined || state.time < this.nextIntroPancakeReminderAt) return undefined;
+    const text = PANCAKE_REMINDER_LINES[this.nextIntroPancakeReminderIndex] ?? PANCAKE_REMINDER_LINES[0];
+    this.nextIntroPancakeReminderIndex = (this.nextIntroPancakeReminderIndex + 1) % PANCAKE_REMINDER_LINES.length;
+    this.nextIntroPancakeReminderAt = state.time + PANCAKE_REMINDER_INTERVAL_SECONDS;
+    return line("A", text, 35, "PANCAKE_REMINDER", durationForText(text, "normal"), "instruction");
   }
 
   private catchLine(state: GameState): DialogueLine | undefined {

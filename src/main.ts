@@ -1398,14 +1398,20 @@ function startBootReadiness(): void {
     updateUi();
     warmAvatarAssetsSoon();
     if (bootQuietTimer !== undefined) window.clearTimeout(bootQuietTimer);
-    bootQuietTimer = window.setTimeout(() => {
+    const openingDelay = new Promise<void>((resolve) => {
+      bootQuietTimer = window.setTimeout(() => {
+        bootQuietTimer = undefined;
+        resolve();
+      }, 300);
+    });
+    Promise.allSettled([openingDelay, villainAvatar.preload(avatarOptionById("mr-awesome"))]).then(() => {
       bootQuietTimer = undefined;
       bootPhase = "dialogue";
       bootReady = true;
       previousDialogueState = undefined;
       lastDialogueKey = "";
       updateUi();
-    }, 1000);
+    });
   };
   Promise.allSettled([...openingAssets, fontReady])
     .then(revealAssets)
@@ -1416,9 +1422,8 @@ function warmAvatarAssetsSoon(): void {
   if (avatarWarmStarted) return;
   avatarWarmStarted = true;
   const warm = () => {
-    void villainAvatar.setModel(avatarOptionById(avatarCharacterId));
     for (const option of AVATAR_CHARACTER_OPTIONS) {
-      if (option.id !== avatarCharacterId) void villainAvatar.preload(option);
+      void villainAvatar.preload(option);
     }
   };
   const requestIdle = (window as Window & {

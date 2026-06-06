@@ -692,6 +692,72 @@ try {
     const panel = director.update(state, moved, { editMode: false, cheatMode: false });
     return panel?.eventType !== "OPENING_TUTORIAL";
   });
+  check("intro pancake reminders wait eight seconds and alternate", () => {
+    const reminderLines = new Set(["More pancakes, please!", "I'm still hungry for pancakes..."]);
+    let state = simulation.createInitialState(introFivePancakeTown, 0, 0);
+    const director = new dialogue.DialogueDirector();
+    let previous;
+    director.update(undefined, state, { editMode: false, cheatMode: false });
+    for (let index = 0; index < 3; index += 1) {
+      previous = state;
+      state = moveAndSettle(simulation, state);
+      director.update(previous, state, { editMode: false, cheatMode: false });
+    }
+    const countThreeAt = state.time;
+    let sawEarlyReminder = false;
+    while (state.time < countThreeAt + 7.9) {
+      previous = state;
+      state = simulation.tickGame(state, 0.05, { hazardsEnabled: false });
+      const panel = director.update(previous, state, { editMode: false, cheatMode: false });
+      sawEarlyReminder ||= panel?.eventType === "PANCAKE_REMINDER";
+    }
+    if (sawEarlyReminder) return false;
+
+    const seen = [];
+    while (state.time < countThreeAt + 16.4 && seen.length < 2) {
+      previous = state;
+      state = simulation.tickGame(state, 0.05, { hazardsEnabled: false });
+      const panel = director.update(previous, state, { editMode: false, cheatMode: false });
+      if (panel?.eventType === "PANCAKE_REMINDER" && panel.text !== seen[seen.length - 1]) seen.push(panel.text);
+    }
+    return seen.length === 2
+      && reminderLines.has(seen[0])
+      && reminderLines.has(seen[1])
+      && seen[0] !== seen[1];
+  });
+  check("intro pancake reminder resets when another pancake is collected", () => {
+    let state = simulation.createInitialState(introFivePancakeTown, 0, 0);
+    const director = new dialogue.DialogueDirector();
+    let previous;
+    director.update(undefined, state, { editMode: false, cheatMode: false });
+    for (let index = 0; index < 3; index += 1) {
+      previous = state;
+      state = moveAndSettle(simulation, state);
+      director.update(previous, state, { editMode: false, cheatMode: false });
+    }
+    const countThreeAt = state.time;
+    let reminderSeen = false;
+    while (state.time < countThreeAt + 8.4 && !reminderSeen) {
+      previous = state;
+      state = simulation.tickGame(state, 0.05, { hazardsEnabled: false });
+      const panel = director.update(previous, state, { editMode: false, cheatMode: false });
+      reminderSeen = panel?.eventType === "PANCAKE_REMINDER";
+    }
+    if (!reminderSeen) return false;
+
+    previous = state;
+    state = moveAndSettle(simulation, state);
+    const countFourAt = state.time;
+    const collectionPanel = director.update(previous, state, { editMode: false, cheatMode: false });
+    if (collectionPanel?.eventType === "PANCAKE_REMINDER") return false;
+    while (state.time < countFourAt + 7.9) {
+      previous = state;
+      state = simulation.tickGame(state, 0.05, { hazardsEnabled: false });
+      const panel = director.update(previous, state, { editMode: false, cheatMode: false });
+      if (panel?.eventType === "PANCAKE_REMINDER") return false;
+    }
+    return true;
+  });
   check("fifth intro pancake summons without counting the trigger pancake", () => {
     let state = simulation.createInitialState(introFivePancakeTown, 0, 0);
     for (let index = 0; index < 5; index += 1) state = moveAndSettle(simulation, state);
@@ -705,6 +771,25 @@ try {
       && state.player.hop?.toZ === 2
       && state.player.hop.fromZ - state.player.hop.toZ === 3
       && state.player.hop.duration >= 0.8;
+  });
+  check("intro pancake reminder does not fire after the stolen fifth pancake", () => {
+    let state = simulation.createInitialState(introFivePancakeTown, 0, 0);
+    const director = new dialogue.DialogueDirector();
+    let previous;
+    director.update(undefined, state, { editMode: false, cheatMode: false });
+    for (let index = 0; index < 5; index += 1) {
+      previous = state;
+      state = moveAndSettle(simulation, state);
+      director.update(previous, state, { editMode: false, cheatMode: false });
+    }
+    if (state.stage.mode !== "summoning" || state.collectedPancakes.size !== 4) return false;
+    for (let index = 0; index < 140; index += 1) {
+      previous = state;
+      state = simulation.tickGame(state, 0.05, { hazardsEnabled: false });
+      const panel = director.update(previous, state, { editMode: false, cheatMode: false });
+      if (panel?.eventType === "PANCAKE_REMINDER") return false;
+    }
+    return true;
   });
   check("five-second intro trigger uses the next pancake without counting it", () => {
     let state = simulation.createInitialState(introFivePancakeTown, 0, 0);
@@ -933,6 +1018,28 @@ try {
   check("cheat mode skips intro camera handoff", () => {
     const state = simulation.enterCheatMode(simulation.createInitialState(introFivePancakeTown, 0, 0));
     return state.stage.mode === "chase" && state.stage.introCameraHandoffDone;
+  });
+  check("first obstacle tutorial waits until after the first target catch", () => {
+    const state = simulation.createInitialState(introRoadTown, 0, 0);
+    const baseChaseState = {
+      ...state,
+      phase: "running",
+      time: 10,
+      stage: {
+        ...state.stage,
+        mode: "chase",
+        target: { x: 0, z: 2, visible: true },
+        introCameraHandoffDone: true,
+      },
+    };
+    const beforeFirstCatch = new dialogue.DialogueDirector().update(undefined, baseChaseState, { editMode: false, cheatMode: false });
+    const afterFirstCatch = new dialogue.DialogueDirector().update(
+      undefined,
+      { ...baseChaseState, stage: { ...baseChaseState.stage, catchCount: 1 } },
+      { editMode: false, cheatMode: false },
+    );
+    return beforeFirstCatch?.eventType !== "FIRST_OBSTACLE"
+      && afterFirstCatch?.eventType === "FIRST_OBSTACLE";
   });
   check("reveal dialogue suppresses lower-priority comments", () => {
     let state = simulation.createInitialState(introFivePancakeTown, 0, 0);
