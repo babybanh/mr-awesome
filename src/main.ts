@@ -496,6 +496,14 @@ function pulseMoveButton(action: MoveAction): void {
   });
 }
 
+function performMoveAction(move: MoveAction): void {
+  if (!bootReady) return;
+  if (handleOpeningTutorialStart()) return;
+  state = applyAction(state, move, { allowMoveFromTerminal: editMode || cheatMode, cheatMode });
+  syncMusicNow();
+  updateUi();
+}
+
 function bindButtons(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
     if (!EDITOR_ENABLED && button.closest(".bottom-actions")) return;
@@ -514,21 +522,23 @@ function bindButtons(): void {
 
   document.querySelectorAll<HTMLButtonElement>("[data-move]").forEach((button) => {
     const clearPress = () => button.classList.remove("is-pressing");
-    button.addEventListener("pointerdown", () => button.classList.add("is-pressing"));
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      button.classList.add("is-pressing");
+      unlockMusic();
+      const move = button.dataset.move as MoveAction | undefined;
+      if (move) performMoveAction(move);
+    });
     button.addEventListener("pointerup", clearPress);
     button.addEventListener("pointercancel", clearPress);
     button.addEventListener("pointerleave", clearPress);
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      if (event.detail !== 0) return;
       button.blur();
       clearPress();
       unlockMusic();
       const move = button.dataset.move as MoveAction | undefined;
-      if (!move) return;
-      if (!bootReady) return;
-      if (handleOpeningTutorialStart()) return;
-      state = applyAction(state, move, { allowMoveFromTerminal: editMode || cheatMode, cheatMode });
-      syncMusicNow();
-      updateUi();
+      if (move) performMoveAction(move);
     });
   });
 
@@ -871,11 +881,13 @@ function scheduleUiAfterAvatarPaint(): void {
 function applyDialogueSpeakerVisual(speaker: "A" | "B"): boolean {
   const nextCharacter: AvatarCharacterId = speaker === "A" ? "mr-awesome" : "mr-not-so-awesome";
   const nextBackground: AvatarBackgroundId = speaker === "A" ? "sky" : "mint";
+  const option = avatarOptionById(nextCharacter);
   if (!villainAvatar.isModelReady(nextCharacter)) {
-    void villainAvatar.preload(avatarOptionById(nextCharacter)).then(() => scheduleUiAfterAvatarPaint());
+    void villainAvatar.preload(option).then(() => scheduleUiAfterAvatarPaint());
     return false;
   }
   if (avatarCharacterId !== nextCharacter) applyAvatarCharacter(nextCharacter, { persist: false, updateSpeakerLabel: false });
+  else if (!villainAvatar.isShowingModel(nextCharacter)) void villainAvatar.setModel(option).then(() => scheduleUiAfterAvatarPaint());
   if (avatarBox.dataset.avatarBackground !== nextBackground) applyAvatarBackground(nextBackground, { persist: false });
   return true;
 }
@@ -1020,12 +1032,29 @@ function bindNativeGestureGuards(): void {
     if (shouldKeepNativeGesture(event.target)) return;
     event.preventDefault();
   };
+  const blockMultiTouch = (event: TouchEvent) => {
+    if (shouldKeepNativeGesture(event.target)) return;
+    if (event.touches.length > 1) event.preventDefault();
+  };
+  let lastTouchEndAt = 0;
+  const blockRapidRetap = (event: TouchEvent) => {
+    if (shouldKeepNativeGesture(event.target)) return;
+    const now = window.performance.now();
+    if (now - lastTouchEndAt < 320) event.preventDefault();
+    lastTouchEndAt = now;
+  };
 
-  for (const eventName of ["contextmenu", "selectstart", "dragstart"] as const) {
+  for (const eventName of ["contextmenu", "selectstart", "dragstart", "dblclick"] as const) {
     composition.addEventListener(eventName, blockNativeGesture, { capture: true });
   }
 
+  for (const eventName of ["gesturestart", "gesturechange", "gestureend"] as const) {
+    document.addEventListener(eventName, blockNativeGesture, { capture: true, passive: false });
+  }
+
+  composition.addEventListener("touchstart", blockMultiTouch, { capture: true, passive: false });
   composition.addEventListener("touchmove", blockNativeGesture, { capture: true, passive: false });
+  composition.addEventListener("touchend", blockRapidRetap, { capture: true, passive: false });
 }
 
 function advanceRevealConversationFromUi(event?: Event): boolean {

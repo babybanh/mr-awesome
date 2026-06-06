@@ -274,6 +274,12 @@ interface EscapeVisual {
   opacity: number;
 }
 
+interface TargetTravelVisual {
+  x: number;
+  z: number;
+  visual: EscapeVisual;
+}
+
 export interface RenderEditSelection {
   x: number;
   z: number;
@@ -849,12 +855,19 @@ export class ThreeStageRenderer {
           this.addPrimitiveTarget(target.x, target.z, visual);
         }
       }
-    } else if (state.stage.targetEscape && state.stage.targetEscape.z >= renderWindow.minZ && state.stage.targetEscape.z <= renderWindow.maxZ) {
-      const escape = escapeVisual(state.stage.targetEscape.startedAt, state.time);
-      if (escape) {
-        const target = state.stage.targetEscape;
-        if (!this.addMrNotSoAwesomeTarget(target.x, target.z, escape)) {
-          this.addPrimitiveTarget(target.x, target.z, escape);
+    } else if (state.stage.targetEscape) {
+      const travel = targetTravelVisual(state);
+      if (travel && isZInRenderWindow(travel.z, renderWindow)) {
+        if (!this.addMrNotSoAwesomeTarget(travel.x, travel.z, travel.visual)) {
+          this.addPrimitiveTarget(travel.x, travel.z, travel.visual);
+        }
+      } else if (!state.stage.targetPending && isZInRenderWindow(state.stage.targetEscape.z, renderWindow)) {
+        const escape = escapeVisual(state.stage.targetEscape.startedAt, state.time);
+        if (escape) {
+          const target = state.stage.targetEscape;
+          if (!this.addMrNotSoAwesomeTarget(target.x, target.z, escape)) {
+            this.addPrimitiveTarget(target.x, target.z, escape);
+          }
         }
       }
     }
@@ -1287,6 +1300,48 @@ function pancakeEscapeVisual(x: number, z: number, state: GameState): EscapeVisu
   return escapeVisual(startedAt, state.time, x * 0.017 + z * 0.011);
 }
 
+function targetTravelVisual(state: GameState): TargetTravelVisual | null {
+  const from = state.stage.targetEscape;
+  const to = state.stage.targetPending;
+  if (!from || !to) return null;
+  const revealAt = state.stage.targetRevealAt ?? from.startedAt + ESCAPE_POP_SECONDS;
+  const duration = Math.max(0.18, revealAt - from.startedAt);
+  const progress = clamp((state.time - from.startedAt) / duration, 0, 1);
+  if (progress >= 1) return null;
+  const eased = targetFlightProgress(progress);
+  const arc = Math.sin(eased * Math.PI);
+  const landing = progress > 0.82 ? easeOutCubic((progress - 0.82) / 0.18) : 0;
+  const lateralOffset = targetFlightLateralOffset(from.x, from.z, to.x, to.z, state.stage.catchCount, progress);
+  return {
+    x: lerp(from.x, to.x, eased) + lateralOffset,
+    z: lerp(from.z, to.z, eased),
+    visual: {
+      yOffset: 0.24 * easeInCubic(progress) + 0.52 * arc - 0.1 * landing,
+      zOffset: 0.018 * Math.sin(progress * Math.PI * 7) * arc,
+      scale: 1 + 0.08 * arc - 0.04 * landing,
+      opacity: 1,
+    },
+  };
+}
+
+function targetFlightProgress(progress: number): number {
+  if (progress < 0.38) return 0.18 * easeInCubic(progress / 0.38);
+  return 0.18 + 0.82 * easeOutCubic((progress - 0.38) / 0.62);
+}
+
+function targetFlightLateralOffset(fromX: number, fromZ: number, toX: number, toZ: number, catchCount: number, progress: number): number {
+  const seed = positiveModulo(Math.round((fromX + 9) * 31 + (fromZ + 3) * 17 + (toX + 11) * 43 + (toZ + 5) * 13 + catchCount * 29), 6);
+  if (seed === 0) return 0;
+  const direction = seed % 2 === 0 ? 1 : -1;
+  const amplitude = seed <= 2 ? 0.24 : 0.34;
+  if (seed <= 2) return direction * amplitude * Math.sin(progress * Math.PI);
+  return direction * amplitude * Math.sin(progress * Math.PI * 2) * 0.82;
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
+}
+
 function escapeVisual(startedAt: number, time: number, driftSeed = 0): EscapeVisual | null {
   const progress = clamp((time - startedAt) / ESCAPE_POP_SECONDS, 0, 1);
   if (progress >= 1) return null;
@@ -1309,6 +1364,10 @@ function easeOutCubic(value: number): number {
 
 function easeInCubic(value: number): number {
   return value * value * value;
+}
+
+function isZInRenderWindow(z: number, renderWindow: RenderWindow): boolean {
+  return z >= renderWindow.minZ && z <= renderWindow.maxZ;
 }
 
 function setObjectOpacity(object: THREE.Object3D, opacity: number): void {

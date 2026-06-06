@@ -100,6 +100,10 @@ export class VillainAvatarRenderer {
     return this.models.has(modelId);
   }
 
+  isShowingModel(modelId: string): boolean {
+    return this.modelId === modelId && Boolean(this.model);
+  }
+
   setModel(modelDefinition: AvatarModelDefinition): Promise<void> {
     if (this.modelId === modelDefinition.id && this.model) {
       this.container.classList.add("is-loaded");

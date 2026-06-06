@@ -8,7 +8,7 @@ export const GRID = {
 
 export const PLAYER = {
   hopDuration: 0.19,
-  inputBufferSeconds: 0.16,
+  inputBufferSeconds: 0.24,
   hopArcHeight: 0.27,
   hitboxWidth: 0.58,
 } as const;

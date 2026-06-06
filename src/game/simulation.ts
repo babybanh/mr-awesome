@@ -40,6 +40,7 @@ const TARGET_AUTO_CATCH_MAX_ROWS_BEHIND = 7;
 const TARGET_AUTO_CATCH_LIMIT = 3;
 const PREFINAL_TARGET_Z = 453;
 const TARGET_CENTER_PRIORITY = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5] as const;
+const FORWARD_MOVE_SPEED_MULTIPLIER = 1.1;
 
 const MOVE_DELTAS: Record<MoveAction, { dx: number; dz: number }> = {
   forward: { dx: 0, dz: 1 },
@@ -307,14 +308,20 @@ export function enterCheatMode(state: GameState): GameState {
 function startMove(state: GameState, move: MoveAction, options: ActionOptions = {}): GameState {
   if (!options.cheatMode && isIntroCameraHandoffActive(state)) return state;
   const delta = MOVE_DELTAS[move];
-  const targetX = clamp(Math.round(state.player.x) + delta.dx, GRID.minX, GRID.maxX);
+  let targetX = clamp(Math.round(state.player.x) + delta.dx, GRID.minX, GRID.maxX);
   const maxLaneZ = Math.max(...state.lanes.keys());
-  const targetZ = clamp(Math.round(state.player.z) + delta.dz, 0, maxLaneZ);
-  const lane = state.lanes.get(targetZ);
+  let targetZ = clamp(Math.round(state.player.z) + delta.dz, 0, maxLaneZ);
+  let lane = state.lanes.get(targetZ);
   if (!lane) return state;
-  if (state.stage.mode === "introPancakes" && !options.cheatMode && lane.kind === "river") return state;
+  if (state.stage.mode === "introPancakes" && !options.cheatMode && lane.kind === "river") {
+    targetX = Math.round(state.player.x);
+    targetZ = Math.round(state.player.z);
+    lane = state.lanes.get(targetZ);
+    if (!lane) return state;
+  }
   if (isGroundLane(lane) && (lane.blockers.includes(targetX) || lane.buildings.includes(targetX))) return state;
-  const duration = options.cheatMode ? PLAYER.hopDuration / 3 : PLAYER.hopDuration;
+  const baseDuration = move === "forward" ? PLAYER.hopDuration / FORWARD_MOVE_SPEED_MULTIPLIER : PLAYER.hopDuration;
+  const duration = options.cheatMode ? baseDuration / 3 : baseDuration;
   const stage = state.stage.lastEvent?.startsWith("Recovered from")
     ? { ...state.stage, lastEvent: undefined }
     : state.stage;

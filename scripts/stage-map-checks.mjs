@@ -682,17 +682,17 @@ try {
     const moved = simulation.applyAction(state, "forward");
     return moved.player.hop === undefined && moved.player.z === 0;
   });
-  check("intro mode cannot jump forward into river/log lanes", () => {
+  check("intro mode bumps in place before river/log lanes", () => {
     const state = simulation.createInitialState(introBlockedRiverTown, 0, 0);
     const moved = simulation.applyAction(state, "forward");
-    return moved.player.hop === undefined && moved.player.z === 0 && moved.stage.mode === "introPancakes";
+    return moved.player.hop?.toZ === 0 && moved.player.z === 0 && moved.stage.mode === "introPancakes";
   });
   check("intro mode can move forward into road lanes", () => {
     const state = simulation.createInitialState(introRoadTown, 0, 0);
     const moved = simulation.applyAction(state, "forward");
     return moved.player.hop?.toZ === 1
       && moved.stage.mode === "introPancakes"
-      && approx(moved.player.hop.duration, 0.19);
+      && approx(moved.player.hop.duration, 0.19 / 1.1);
   });
   check("cheat mode bypasses intro river lock and moves three times faster", () => {
     const state = simulation.enterCheatMode(simulation.createInitialState(introBlockedRiverTown, 0, 0));
