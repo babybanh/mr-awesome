@@ -547,7 +547,7 @@ const B_TERRAIN_LINES: Record<DialogueTerrainTag, readonly string[]> = {
   MIXED_HARD: [
     "Busy part ahead!",
     "Roads, logs, chaos!",
-    "Pick carefully, hero.",
+    "Move carefully, hero.",
     "This part is tricky.",
     "Everything is happening!",
   ],
@@ -729,7 +729,7 @@ export class DialogueDirector {
     }
 
     if (state.time < this.nextAmbientAttemptAt) return undefined;
-    this.nextAmbientAttemptAt = state.time + 4 + seededUnit(state) * 3;
+    this.nextAmbientAttemptAt = state.time + 7 + seededUnit(state) * 5;
 
     if (state.stage.mode === "summoning") return undefined;
     if (state.stage.mode !== "chase") return undefined;
@@ -748,7 +748,7 @@ export class DialogueDirector {
     }
 
     if (state.stage.catchCount < 2) return undefined;
-    const cooldown = state.stage.catchCount >= 3 ? 4.5 : 6.5;
+    const cooldown = state.stage.catchCount >= 3 ? 10 : 12;
     const tag = terrainTagForState(state);
     return this.pickLine("B", B_TERRAIN_LINES[tag], 45, "TERRAIN_BREADCRUMB", state, {
       tone: "neutral",
@@ -854,7 +854,7 @@ export class DialogueDirector {
       this.lastCleanCatchCommentAt = state.time;
       this.lastCleanCatchCount = this.catchesSinceLastHit;
     }
-    this.suppressAmbientUntil = state.time + 1.5;
+    this.suppressAmbientUntil = state.time + 5.5;
     this.recentCatchTexts = [text, ...this.recentCatchTexts.filter((recent) => recent !== text)].slice(0, 12);
     this.repeatedHitCount = 0;
     if (this.lastCatchSpeaker === speaker) this.sameSpeakerCatchStreak += 1;
