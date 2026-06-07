@@ -604,11 +604,11 @@ try {
       && approx(bigLakesRoad.gap, 4.5 * 0.66 * 1.7 * 0.9 * 0.8 * 1.2)
       && approx(bigLakesTrain.speed, 2.2 * 1.2 * 1.5 * 1.1 * 1.2)
       && approx(bigLakesTrain.gap, 6.8 * 2 * 1.2 * 0.9 * 0.8 * 0.9)
-      && approx(bigLakesRiver.speed, 1.4 * 1.2 * 1.2 * 0.7 * 1.1)
+      && approx(bigLakesRiver.speed, 1.4 * 1.2 * 1.2 * 0.7 * 1.2)
       && approx(bigLakesRiver.gap, 5 * 0.56)
       && approx(beforeFinalBillboardRoad.speed, 1.55 * 0.8 * 1.3 * 1.15 * 1.1 * 1.2 * 1.2)
       && approx(afterFinalBillboardRoad.speed, 2.35 * 0.8 * 1.3 * 1.15 * 1.1 * 1.2 * 1.2 * 1.1)
-      && approx(afterFinalBillboardRoad.gap, 5.8 * 0.66 * 1.7 * 0.9 * 0.8 * 1.2);
+      && approx(afterFinalBillboardRoad.gap, 5.8 * 0.66 * 1.7 * 0.9 * 0.8 * 1.2 * 1.1);
   });
   check("warning signs and billboards parse and serialize", () => {
     const result = stageMap.parseStageMap(trainIntroTown);
@@ -945,6 +945,50 @@ try {
       && ticked.stage.introCameraHandoffReleaseAt !== undefined
       && ticked.stage.catchCount === 1;
   });
+  check("target catch spawns farther after the Big Lakes ramp", () => {
+    const state = simulation.createInitialState(stageMap.baselineStageMap(), 0, 0);
+    const staged = {
+      ...state,
+      phase: "running",
+      player: { x: 0, z: 212, maxZ: 212 },
+      stage: {
+        ...state.stage,
+        mode: "chase",
+        target: { x: 0, z: 212, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 212 }],
+        catchCount: 8,
+        introCameraHandoffDone: true,
+      },
+    };
+    const ticked = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
+    return ticked.stage.targetPending !== undefined
+      && ticked.stage.targetPending.z >= 234
+      && ticked.stage.targetPending.z <= 248
+      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * 1.35 * 1.35)
+      && ticked.stage.catchCount === 9;
+  });
+  check("target catch starts spawning farther after the first ramp", () => {
+    const state = simulation.createInitialState(stageMap.baselineStageMap(), 0, 0);
+    const staged = {
+      ...state,
+      phase: "running",
+      player: { x: 0, z: 76, maxZ: 76 },
+      stage: {
+        ...state.stage,
+        mode: "chase",
+        target: { x: 0, z: 76, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 76 }],
+        catchCount: 3,
+        introCameraHandoffDone: true,
+      },
+    };
+    const ticked = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
+    return ticked.stage.targetPending !== undefined
+      && ticked.stage.targetPending.z >= 92
+      && ticked.stage.targetPending.z <= 103
+      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * 1.35)
+      && ticked.stage.catchCount === 4;
+  });
   check("first target catch blocks movement until camera handoff releases", () => {
     const state = simulation.createInitialState(introFivePancakeTown, 0, 0);
     const staged = {
@@ -1096,7 +1140,7 @@ try {
       && panel.speaker === "B"
       && panel.text === "No! I forgot to build an exit!";
   });
-  check("final ending fades to a finished state with credits available", () => {
+  check("final ending fades to black and restarts from the beginning", () => {
     const state = simulation.createInitialState(riverIntroTown, 0, 0);
     let staged = {
       ...state,
@@ -1116,15 +1160,50 @@ try {
     const finalFadeAt = staged.stage.finalFadeStartedAt;
     for (let index = 0; index < 380; index += 1) staged = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
     return finalFadeAt !== undefined
-      && staged.runId === finalRunId
-      && staged.stage.mode === "postVictoryTutorial"
+      && staged.runId === finalRunId + 1
+      && staged.stage.mode === "introPancakes"
       && staged.stage.target.visible === false
-      && staged.stage.postVictoryStartedAt !== undefined
-      && staged.stage.lastEvent === "Post Victory Credits Available";
+      && staged.score === 0
+      && staged.phase === "ready";
   });
   check("cheat mode skips intro camera handoff", () => {
     const state = simulation.enterCheatMode(simulation.createInitialState(introFivePancakeTown, 0, 0));
     return state.stage.mode === "chase" && state.stage.introCameraHandoffDone;
+  });
+  check("leaving cheat mode can advance the target to the next spawn", () => {
+    const state = simulation.enterCheatMode(simulation.createInitialState(stageMap.baselineStageMap(), 0, 0));
+    const staged = {
+      ...state,
+      player: { x: 0, z: 76, maxZ: 76 },
+      stage: {
+        ...state.stage,
+        target: { x: 0, z: 76, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 76 }],
+        catchCount: 2,
+        introCameraHandoffDone: true,
+      },
+    };
+    const advanced = simulation.advanceTargetToNextSpawn(staged);
+    return advanced.stage.mode === "chase"
+      && advanced.stage.target.visible === true
+      && advanced.stage.target.z >= 92
+      && advanced.stage.target.z <= 103
+      && advanced.stage.catchCount === staged.stage.catchCount
+      && advanced.stage.targetSpawnHistory.length === 2
+      && advanced.stage.lastEvent === "Cheat Target Advanced";
+  });
+  check("cheat ending jump puts the hero near the final target", () => {
+    const state = simulation.enterCheatMode(simulation.createInitialState(stageMap.baselineStageMap(), 0, 0));
+    const jumped = simulation.jumpCheatToEnding(state);
+    return jumped.stage.mode === "chase"
+      && jumped.phase === "running"
+      && jumped.player.hop === undefined
+      && jumped.queuedMove === undefined
+      && jumped.stage.target.visible === true
+      && jumped.stage.target.z === 453
+      && jumped.player.z < jumped.stage.target.z
+      && jumped.stage.target.z - jumped.player.z <= 20
+      && jumped.stage.lastEvent === "Cheat Ending Jump";
   });
   check("first obstacle tutorial waits until after the first target catch", () => {
     const state = simulation.createInitialState(introRoadTown, 0, 0);
@@ -1342,7 +1421,7 @@ try {
     const ticked = simulation.tickGame(staged, 0, { hazardsEnabled: true });
     return ticked.phase === "running" && ticked.crashReason === "Water" && ticked.player.z === 2;
   });
-  check("hazard recovery rewinds a far target to its previous spawn", () => {
+  check("hazard recovery preserves a far target for miss pullback logic", () => {
     const state = simulation.createInitialState(trainIntroTown, 0, 0);
     const trainLane = state.lanes.get(8);
     const span = simulation.getMovingSpans(trainLane, 0, -6, 6).find((item) => Math.abs(item.centerX) <= 6);
@@ -1360,7 +1439,10 @@ try {
       },
     };
     const ticked = simulation.tickGame(staged, 0, { hazardsEnabled: true });
-    return ticked.crashReason === "Train" && ticked.stage.target.visible && ticked.stage.target.z === 20;
+    return ticked.crashReason === "Train"
+      && ticked.stage.target.visible
+      && ticked.stage.target.z === 35
+      && ticked.stage.targetSpawnHistory.length === 2;
   });
   check("direction signs are screen directions for cars, trains, and logs", () => {
     const state = simulation.createInitialState(trainIntroTown, 0, 0);

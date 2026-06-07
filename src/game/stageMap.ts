@@ -1096,9 +1096,10 @@ const POST_BIG_LAKES_BILLBOARD_Z = 197;
 const POST_BIG_LAKES_ROAD_SPEED_MULTIPLIER = 1.2;
 const POST_BIG_LAKES_ROAD_GAP_MULTIPLIER = 1.2;
 const POST_BIG_LAKES_TRAIN_GAP_MULTIPLIER = 0.9;
-const POST_BIG_LAKES_RIVER_SPEED_MULTIPLIER = 1.1;
+const POST_BIG_LAKES_RIVER_SPEED_MULTIPLIER = 1.2;
 const POST_FINAL_BILLBOARD_Z = 373;
 const POST_FINAL_BILLBOARD_ROAD_SPEED_MULTIPLIER = 1.1;
+const POST_FINAL_BILLBOARD_ROAD_GAP_MULTIPLIER = 1.1;
 
 function sharedRoadTrainDifficultyMultiplier(z: number): { speed: number; gap: number } {
   let speed = 1;
@@ -1122,6 +1123,7 @@ function roadDifficultyMultiplier(z: number): { speed: number; gap: number } {
   }
   if (z > POST_FINAL_BILLBOARD_Z) {
     difficulty.speed *= POST_FINAL_BILLBOARD_ROAD_SPEED_MULTIPLIER;
+    difficulty.gap *= POST_FINAL_BILLBOARD_ROAD_GAP_MULTIPLIER;
   }
   return difficulty;
 }

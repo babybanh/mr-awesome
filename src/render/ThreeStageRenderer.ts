@@ -1187,7 +1187,6 @@ function targetCameraFocusZ(playerZ: number, state: GameState, useStageCamera: b
 }
 
 function stageCameraZoomPercent(state: GameState): number {
-  if (state.stage.mode === "finalSequence") return 138;
   if (state.stage.mode === "introPancakes" || state.stage.mode === "summoning") return REVEAL_CAMERA_ZOOM_PERCENT;
   if (state.stage.mode === "chase" && !state.stage.introCameraHandoffDone) {
     if (state.stage.introCameraHandoffStartedAt !== undefined && state.stage.introCameraHandoffReleaseAt !== undefined) {

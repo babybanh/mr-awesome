@@ -666,6 +666,11 @@ h1 {
   pointer-events: none;
 }
 
+#game-composition.is-opening-tutorial.is-credits-unlocked .credits-trigger {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 #game-composition.is-booting #top-layer,
 #game-composition.is-booting #game-board,
 #game-composition.is-booting #bottom-layer,

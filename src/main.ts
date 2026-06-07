@@ -1,5 +1,5 @@
 import "./styles.css";
-import { applyAction, applyStage, createInitialState, enterCheatMode, isRevealConversationActive, phaseLabel, tickGame } from "./game/simulation";
+import { advanceTargetToNextSpawn, applyAction, applyStage, createInitialState, enterCheatMode, isRevealConversationActive, jumpCheatToEnding, phaseLabel, tickGame } from "./game/simulation";
 import { baselineStageMap, copyStageObject, cycleStageObjectAsset, exportStageFeedback, moveStageObject, objectAt, parseStageMap, serializeStageLane, validateStageMap } from "./game/stageMap";
 import type { GameAction, GameState, GridPoint, MoveAction, MoveStageObjectResult, StageDefinition, StagePlacedObject } from "./game/types";
 import { DialogueDirector, type DialoguePanel } from "./game/dialogue";
@@ -207,6 +207,7 @@ let debugControlsVisible = false;
 let observedRunId = state.runId;
 let bootReady = false;
 let avatarWarmStarted = false;
+let creditsUnlockedThisSession = false;
 
 const elements = {
   dialogueStrip: requireElement<HTMLElement>(".dialogue-strip"),
@@ -402,6 +403,9 @@ function frame(now: number): void {
   const previousState = state;
   if (!creditsOpen) {
     state = tickGame(state, deltaSeconds, { hazardsEnabled: !editMode && !cheatMode, stageCompletionEnabled: !editMode, cheatMode });
+  }
+  if (previousState.stage.mode === "finalSequence" && state.runId !== previousState.runId) {
+    creditsUnlockedThisSession = true;
   }
   if (state.runId !== observedRunId) {
     observedRunId = state.runId;
@@ -998,8 +1002,9 @@ function bindKeyboard(): void {
     unlockMusic();
     if (event.key === "CapsLock") {
       event.preventDefault();
-      cheatMode = !cheatMode;
-      if (cheatMode) state = enterCheatMode(state);
+      const nextCheatMode = !cheatMode;
+      cheatMode = nextCheatMode;
+      state = cheatMode ? enterCheatMode(state) : advanceTargetToNextSpawn(state);
       syncMusicNow();
       setMapStatus(cheatMode ? "Cheat Mode on. Hazards are disabled." : "Cheat Mode off.", cheatMode ? "ok" : "neutral");
       updateUi();
@@ -1011,6 +1016,13 @@ function bindKeyboard(): void {
     event.preventDefault();
     if (!bootReady) return;
     if (isMoveAction(mapped)) pulseMoveButton(mapped);
+    if (cheatMode && event.shiftKey && isMoveAction(mapped)) {
+      state = jumpCheatToEnding(state);
+      syncMusicNow();
+      setMapStatus("Cheat Mode ending jump.", "ok");
+      updateUi();
+      return;
+    }
     if (mapped !== "toggleMap" && handleOpeningTutorialStart()) return;
     if (mapped === "toggleMap") {
       if (EDITOR_ENABLED) elements.mapDrawer.toggleAttribute("hidden");
@@ -1323,6 +1335,7 @@ function updateOpeningTutorialVisuals(): void {
   composition.classList.toggle("is-reveal-conversation-locked", !cheatMode && isRevealConversationActive(state));
   composition.classList.toggle("is-final-conversation", finalConversationActive);
   composition.classList.toggle("is-final-fading", finalFadeActive);
+  composition.classList.toggle("is-credits-unlocked", creditsUnlockedThisSession);
   composition.classList.toggle("is-debug-controls-visible", debugControlsVisible);
   elements.statusStrip.hidden = !EDITOR_ENABLED || !debugControlsVisible;
   elements.bottomActions.hidden = !EDITOR_ENABLED || !debugControlsVisible;

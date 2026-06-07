@@ -17,7 +17,7 @@ export type LaneKind = "grass" | "road" | "river" | "train";
 export type GroundTerrain = "grass" | "dirt";
 export type Direction = -1 | 1;
 export type GamePhase = "ready" | "running" | "paused" | "crashed" | "complete";
-export type StagePlayMode = "introPancakes" | "summoning" | "chase" | "finalSequence" | "postVictoryTutorial";
+export type StagePlayMode = "introPancakes" | "summoning" | "chase" | "finalSequence";
 export type MoveAction = "forward" | "backward" | "left" | "right";
 export type GameAction = MoveAction | "pause" | "restart";
 export type StageObjectKind = "tree" | "building" | "pancake" | "target" | "warning" | "billboard";
@@ -139,7 +139,6 @@ export interface StageRuntime {
   finalRescueStartedAt?: number;
   finalPoofStartedAt?: number;
   finalFadeStartedAt?: number;
-  postVictoryStartedAt?: number;
   firstRiverClearedAt?: number;
   targetReachCompletesStage: boolean;
   lastEvent?: string;
