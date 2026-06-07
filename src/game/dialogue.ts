@@ -10,6 +10,7 @@ export type DialogueEventType =
   | "VILLAIN_REVEAL"
   | "FIRST_CATCH_HANDOFF"
   | "TARGET_CAUGHT"
+  | "TARGET_MISSED"
   | "PLAYER_HIT"
   | "FIRST_RIVER_CLEARED"
   | "FIRST_OBSTACLE"
@@ -118,6 +119,13 @@ const PANCAKE_REMINDER_INTERVAL_SECONDS = 8;
 
 const FIRST_CATCH_LINES = [
   "Nice try, hero. Now the real chase starts!",
+] as const;
+
+const TARGET_MISSED_LINES = [
+  "You forgot to catch me, young hero!",
+  "Wrong way, hero. I'm over here!",
+  "Pancakes later. Catch me first!",
+  "Catch me to keep going!",
 ] as const;
 
 const A_CATCH_LINES = [
@@ -663,6 +671,15 @@ export class DialogueDirector {
         duration: durationForText(pool[0] ?? "", "tiny"),
         cooldownKey: forceMilestoneHitLine ? undefined : "hit",
         cooldownSeconds: 2.2,
+      });
+    }
+
+    const targetMissed = state.stage.lastEvent === "Target missed" && previous.stage.lastEvent !== "Target missed";
+    if (targetMissed) {
+      this.suppressAmbientUntil = state.time + 2.4;
+      return this.pickLine("B", TARGET_MISSED_LINES, 108, "TARGET_MISSED", state, {
+        tone: "instruction",
+        duration: durationForText(TARGET_MISSED_LINES[0] ?? "", "tutorial"),
       });
     }
 

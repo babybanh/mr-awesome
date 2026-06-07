@@ -45,8 +45,8 @@ body {
 
 body {
   min-height: 100vh;
+  min-height: 100svh;
   min-height: 100dvh;
-  min-height: var(--app-vh, 100dvh);
   background: #e4f2ec;
   transition: background 180ms ease-out;
 }
@@ -185,10 +185,9 @@ button:focus:not(:focus-visible) {
 #app-shell {
   position: relative;
   width: 100vw;
-  width: var(--app-vw, 100vw);
   height: 100vh;
+  height: 100svh;
   height: 100dvh;
-  height: var(--app-vh, 100dvh);
   display: grid;
   place-items: center;
   padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
@@ -200,7 +199,9 @@ button:focus:not(:focus-visible) {
 }
 
 #game-composition {
-  --board-size: min(720px, calc(var(--app-vw, 100dvw) - 20px), calc((var(--app-vh, 100dvh) - 44px) / 1.6));
+  --board-size: min(720px, calc(100vw - 20px), calc((100vh - 44px) / 1.6));
+  --board-size: min(720px, calc(100vw - 20px), calc((100svh - 44px) / 1.6));
+  --board-size: min(720px, calc(100dvw - 20px), calc((100dvh - 44px) / 1.6));
   position: relative;
   width: var(--board-size);
   display: grid;
@@ -1284,22 +1285,41 @@ h1 {
 
 .modal-close {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  place-items: center;
+  width: 60px;
+  min-width: 60px;
+  min-height: 60px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: transparent;
+  background: transparent;
+  box-shadow: none;
+  font-size: 0;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.modal-close::after {
+  content: "X";
+  position: absolute;
+  top: 15px;
+  right: 15px;
   display: grid;
   place-items: center;
   width: 30px;
-  min-width: 30px;
-  min-height: 30px;
-  padding: 0;
-  border: 0;
+  height: 30px;
   border-radius: 9px;
-  color: #173439;
-  background: rgba(232, 247, 255, 0.78);
+  color: #21302d;
+  background: linear-gradient(180deg, #ffd96a 0%, #f2bf3f 68%, #dda52c 100%);
   box-shadow: none;
   font-size: 15px;
   font-weight: 950;
   line-height: 1;
+  pointer-events: none;
 }
 
 .modal-close:focus:not(:focus-visible) {
@@ -1759,7 +1779,9 @@ body:not([data-editor-enabled="true"]) .gameplay-zoom-guide {
   }
 
   #game-composition {
-    --board-size: min(calc(var(--app-vw, 100dvw) - 16px), calc((var(--app-vh, 100dvh) - 40px) / 1.6));
+    --board-size: min(calc(100vw - 16px), calc((100vh - 40px) / 1.6));
+    --board-size: min(calc(100vw - 16px), calc((100svh - 40px) / 1.6));
+    --board-size: min(calc(100dvw - 16px), calc((100dvh - 40px) / 1.6));
   }
 
   h1 {
@@ -1844,7 +1866,25 @@ body:not([data-editor-enabled="true"]) .gameplay-zoom-guide {
 
 @media (min-width: 721px) and (max-width: 1180px) and (min-height: 760px) {
   #game-composition {
-    --board-size: min(820px, calc(var(--app-vw, 100dvw) - 32px), calc((var(--app-vh, 100dvh) - 48px) / 1.6));
+    --board-size: min(820px, calc(100vw - 32px), calc((100vh - 48px) / 1.6));
+    --board-size: min(820px, calc(100vw - 32px), calc((100svh - 48px) / 1.6));
+    --board-size: min(820px, calc(100dvw - 32px), calc((100dvh - 48px) / 1.6));
+  }
+}
+
+@media (max-width: 560px), (max-height: 720px) {
+  #game-composition {
+    --board-size: min(calc(100vw - 16px), calc((100vh - 40px) / 1.6));
+    --board-size: min(calc(100vw - 16px), calc((100svh - 40px) / 1.6));
+    --board-size: min(calc(100dvw - 16px), calc((100dvh - 40px) / 1.6));
+  }
+}
+
+@media (min-width: 820px) and (min-height: 820px) {
+  #game-composition {
+    --board-size: min(820px, calc(100vw - 32px), calc((100vh - 48px) / 1.6));
+    --board-size: min(820px, calc(100vw - 32px), calc((100svh - 48px) / 1.6));
+    --board-size: min(820px, calc(100dvw - 32px), calc((100dvh - 48px) / 1.6));
   }
 }
 
@@ -1869,7 +1909,9 @@ body:not([data-editor-enabled="true"]) .gameplay-zoom-guide {
   }
 
   #game-composition {
-    --board-size: min(calc(var(--app-vw, 100dvw) - 16px), calc((var(--app-vh, 100dvh) - 34px) / 1.6), 560px);
+    --board-size: min(calc(100vw - 16px), calc((100vh - 34px) / 1.6), 560px);
+    --board-size: min(calc(100vw - 16px), calc((100svh - 34px) / 1.6), 560px);
+    --board-size: min(calc(100dvw - 16px), calc((100dvh - 34px) / 1.6), 560px);
     gap: 6px;
   }
 
@@ -1908,17 +1950,4 @@ body:not([data-editor-enabled="true"]) .gameplay-zoom-guide {
     width: 21px;
     height: 21px;
   }
-}
-
-html[data-viewport-tier="small"] #game-composition {
-  --board-size: min(calc(var(--app-vw, 100dvw) - 16px), calc((var(--app-vh, 100dvh) - 40px) / 1.6));
-}
-
-html[data-viewport-tier="large"] #game-composition {
-  --board-size: min(820px, calc(var(--app-vw, 100dvw) - 32px), calc((var(--app-vh, 100dvh) - 48px) / 1.6));
-}
-
-html[data-viewport-landscape-compact="true"] #game-composition {
-  --board-size: min(calc(var(--app-vw, 100dvw) - 16px), calc((var(--app-vh, 100dvh) - 34px) / 1.6), 560px);
-  gap: 6px;
 }

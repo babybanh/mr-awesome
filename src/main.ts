@@ -19,11 +19,7 @@ function syncViewportMetrics(): void {
   const creditsAvailableWidth = Math.max(1, Math.min(boardWidth - 28, width - 28));
   const creditsAvailableHeight = Math.max(1, height * 0.88);
   const creditsScale = Math.min(1, creditsAvailableWidth / 540, creditsAvailableHeight / 360);
-  root.style.setProperty("--app-vw", `${width}px`);
-  root.style.setProperty("--app-vh", `${height}px`);
   root.style.setProperty("--credits-scale", `${Math.max(0.1, creditsScale).toFixed(3)}`);
-  root.dataset.viewportTier = width >= 820 && height >= 820 ? "large" : width <= 560 || height <= 720 ? "small" : "medium";
-  root.dataset.viewportLandscapeCompact = width > height && height <= 760 ? "true" : "false";
 }
 
 function scheduleViewportSync(): void {

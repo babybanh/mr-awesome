@@ -157,7 +157,7 @@ export interface HopState {
   toZ: number;
   elapsed: number;
   duration: number;
-  kind?: "move" | "hazardRecovery" | "summonBump";
+  kind?: "move" | "hazardRecovery" | "summonBump" | "targetPullback";
 }
 
 export interface PlayerState extends GridPoint {

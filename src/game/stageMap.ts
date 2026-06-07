@@ -1086,14 +1086,63 @@ const RIVER_FAST_SPEED_MULTIPLIER = 1.2 * 0.7;
 const RIVER_GAP_MULTIPLIER = 0.56;
 const TRAIN_SPEED_MULTIPLIER = 1.2 * 1.5;
 const TRAIN_GAP_MULTIPLIER = 2 * 1.2;
+const POST_NICE_TRY_BILLBOARD_Z = 70;
+const POST_NICE_TRY_SPEED_MULTIPLIER = 1.1;
+const POST_NICE_TRY_GAP_MULTIPLIER = 0.9;
+const POST_WATCH_FOR_GATORS_BILLBOARD_Z = 127;
+const POST_WATCH_FOR_GATORS_SPEED_MULTIPLIER = 1.2;
+const POST_WATCH_FOR_GATORS_GAP_MULTIPLIER = 0.8;
+const POST_BIG_LAKES_BILLBOARD_Z = 197;
+const POST_BIG_LAKES_ROAD_SPEED_MULTIPLIER = 1.2;
+const POST_BIG_LAKES_ROAD_GAP_MULTIPLIER = 1.2;
+const POST_BIG_LAKES_TRAIN_GAP_MULTIPLIER = 0.9;
+const POST_BIG_LAKES_RIVER_SPEED_MULTIPLIER = 1.1;
+const POST_FINAL_BILLBOARD_Z = 373;
+const POST_FINAL_BILLBOARD_ROAD_SPEED_MULTIPLIER = 1.1;
+
+function sharedRoadTrainDifficultyMultiplier(z: number): { speed: number; gap: number } {
+  let speed = 1;
+  let gap = 1;
+  if (z > POST_NICE_TRY_BILLBOARD_Z) {
+    speed *= POST_NICE_TRY_SPEED_MULTIPLIER;
+    gap *= POST_NICE_TRY_GAP_MULTIPLIER;
+  }
+  if (z > POST_WATCH_FOR_GATORS_BILLBOARD_Z) {
+    speed *= POST_WATCH_FOR_GATORS_SPEED_MULTIPLIER;
+    gap *= POST_WATCH_FOR_GATORS_GAP_MULTIPLIER;
+  }
+  return { speed, gap };
+}
+
+function roadDifficultyMultiplier(z: number): { speed: number; gap: number } {
+  const difficulty = sharedRoadTrainDifficultyMultiplier(z);
+  if (z > POST_BIG_LAKES_BILLBOARD_Z) {
+    difficulty.speed *= POST_BIG_LAKES_ROAD_SPEED_MULTIPLIER;
+    difficulty.gap *= POST_BIG_LAKES_ROAD_GAP_MULTIPLIER;
+  }
+  if (z > POST_FINAL_BILLBOARD_Z) {
+    difficulty.speed *= POST_FINAL_BILLBOARD_ROAD_SPEED_MULTIPLIER;
+  }
+  return difficulty;
+}
+
+function trainDifficultyMultiplier(z: number): { speed: number; gap: number } {
+  const difficulty = sharedRoadTrainDifficultyMultiplier(z);
+  if (z > POST_BIG_LAKES_BILLBOARD_Z) {
+    difficulty.gap *= POST_BIG_LAKES_TRAIN_GAP_MULTIPLIER;
+  }
+  return difficulty;
+}
 
 function roadLane(z: number, direction: Direction, road: RoadTuning): LaneState {
+  const difficulty = roadDifficultyMultiplier(z);
   const speed = (road.speedCode === "F" ? 3.25 : road.speedCode === "M" ? 2.35 : 1.55)
     * ROAD_SPEED_MULTIPLIER
-    * (road.vehicleSize === "M" ? ROAD_MEDIUM_VEHICLE_SPEED_MULTIPLIER : 1);
+    * (road.vehicleSize === "M" ? ROAD_MEDIUM_VEHICLE_SPEED_MULTIPLIER : 1)
+    * difficulty.speed;
   const baseGap = road.gapCode === "S" ? 3.4 : road.gapCode === "M" ? 4.5 : 5.8;
   const densityFactor = road.densityCode === "H" ? 0.66 : road.densityCode === "M" ? 0.82 : 1;
-  const gap = baseGap * densityFactor * ROAD_GAP_MULTIPLIER;
+  const gap = baseGap * densityFactor * ROAD_GAP_MULTIPLIER * difficulty.gap;
   const length = road.vehicleSize === "L" ? 3.3 : road.vehicleSize === "M" ? 2.2 : 1.35;
   return {
     z,
@@ -1111,8 +1160,10 @@ function roadLane(z: number, direction: Direction, road: RoadTuning): LaneState 
 }
 
 function riverLane(z: number, direction: Direction, river: RiverTuning): LaneState {
+  const speedDifficulty = z > POST_BIG_LAKES_BILLBOARD_Z ? POST_BIG_LAKES_RIVER_SPEED_MULTIPLIER : 1;
   const speed = (river.speedCode === "F" ? 2.8 : river.speedCode === "M" ? 2 : 1.4)
-    * (river.speedCode === "F" ? RIVER_FAST_SPEED_MULTIPLIER : RIVER_SPEED_MULTIPLIER);
+    * (river.speedCode === "F" ? RIVER_FAST_SPEED_MULTIPLIER : RIVER_SPEED_MULTIPLIER)
+    * speedDifficulty;
   const gap = (river.gapCode === "S" ? 3.4 : river.gapCode === "L" ? 7 : 5) * RIVER_GAP_MULTIPLIER;
   const length = river.logSize === "L" ? 4.4 : river.logSize === "S" ? 1.85 : 3;
   return {
@@ -1131,9 +1182,11 @@ function riverLane(z: number, direction: Direction, river: RiverTuning): LaneSta
 }
 
 function trainLane(z: number, direction: Direction, train: TrainTuning): LaneState {
+  const difficulty = trainDifficultyMultiplier(z);
   const speed = (train.speedCode === "F" ? 4.8 : train.speedCode === "M" ? 3.4 : 2.2)
-    * TRAIN_SPEED_MULTIPLIER;
-  const gap = (train.gapCode === "S" ? 4.8 : train.gapCode === "M" ? 6.8 : 9.2) * TRAIN_GAP_MULTIPLIER;
+    * TRAIN_SPEED_MULTIPLIER
+    * difficulty.speed;
+  const gap = (train.gapCode === "S" ? 4.8 : train.gapCode === "M" ? 6.8 : 9.2) * TRAIN_GAP_MULTIPLIER * difficulty.gap;
   const length = train.trainSize === "L" ? 6.2 : train.trainSize === "M" ? 4.6 : 3.1;
   return {
     z,

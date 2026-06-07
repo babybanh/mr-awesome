@@ -29,7 +29,6 @@ const FINAL_DIALOGUE_TOTAL_SECONDS = FINAL_LINE_DURATIONS.reduce(
 );
 const FINAL_FADE_DELAY_SECONDS = 0.45;
 const FINAL_FADE_SECONDS = 1.0;
-const POST_VICTORY_AUTO_RESET_SECONDS = 30;
 const REVEAL_CONVERSATION_MIN_LINE_SECONDS = 1.15;
 const REVEAL_CONVERSATION_INPUT_ADVANCE_SECONDS = 0.85;
 const HAZARD_RESPAWN_GROUND_ROWS_BACK = 3;
@@ -37,10 +36,12 @@ const TARGET_MIN_ADVANCE_ROWS = 12;
 const TARGET_MAX_ADVANCE_ROWS = 20;
 const TARGET_MAX_GAP_ROWS = 21;
 const TARGET_AUTO_CATCH_MAX_ROWS_BEHIND = 7;
-const TARGET_AUTO_CATCH_LIMIT = 3;
+const TARGET_MISS_PULLBACK_SECONDS = 0.72;
 const PREFINAL_TARGET_Z = 453;
 const TARGET_CENTER_PRIORITY = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5] as const;
 const FORWARD_MOVE_SPEED_MULTIPLIER = 1.1;
+const SECOND_DIFFICULTY_RAMP_Z = 127;
+const POST_SECOND_RAMP_HOP_SPEED_MULTIPLIER = 1.1;
 
 const MOVE_DELTAS: Record<MoveAction, { dx: number; dz: number }> = {
   forward: { dx: 0, dz: 1 },
@@ -234,6 +235,7 @@ export function getPlayerDisplayPosition(state: GameState): { x: number; z: numb
   const hop = state.player.hop;
   if (!hop) return { x: state.player.x, z: state.player.z, y: 0, hopProgress: 1 };
   const progress = Math.min(1, Math.max(0, hop.elapsed / hop.duration));
+  if (hop.kind === "targetPullback") return targetPullbackDisplayPosition(state, progress);
   const moveProgress = smoothstep(progress);
   return {
     x: hop.fromX + (hop.toX - hop.fromX) * moveProgress,
@@ -243,8 +245,44 @@ export function getPlayerDisplayPosition(state: GameState): { x: number; z: numb
   };
 }
 
+function targetPullbackDisplayPosition(state: GameState, progress: number): { x: number; z: number; y: number; hopProgress: number } {
+  const hop = state.player.hop;
+  if (!hop) return { x: state.player.x, z: state.player.z, y: 0, hopProgress: 1 };
+  const moveProgress = targetPullbackProgress(progress);
+  const arc = Math.sin(moveProgress * Math.PI);
+  return {
+    x: hop.fromX + (hop.toX - hop.fromX) * moveProgress + targetPullbackLateralOffset(hop.fromX, hop.fromZ, hop.toX, hop.toZ, state.stage.catchCount, progress),
+    z: hop.fromZ + (hop.toZ - hop.fromZ) * moveProgress,
+    y: 0.42 * arc,
+    hopProgress: progress,
+  };
+}
+
+function targetPullbackProgress(progress: number): number {
+  if (progress < 0.34) return 0.16 * easeInCubic(progress / 0.34);
+  return 0.16 + 0.84 * easeOutCubic((progress - 0.34) / 0.66);
+}
+
+function targetPullbackLateralOffset(fromX: number, fromZ: number, toX: number, toZ: number, catchCount: number, progress: number): number {
+  const seed = positiveModulo(Math.round((fromX + 9) * 29 + (fromZ + 3) * 23 + (toX + 11) * 41 + (toZ + 5) * 17 + catchCount * 31), 6);
+  if (seed === 0) return 0;
+  const direction = seed % 2 === 0 ? 1 : -1;
+  const amplitude = seed <= 2 ? 0.2 : 0.3;
+  if (seed <= 2) return direction * amplitude * Math.sin(progress * Math.PI);
+  return direction * amplitude * Math.sin(progress * Math.PI * 2) * 0.78;
+}
+
 function smoothstep(value: number): number {
   return value * value * (3 - 2 * value);
+}
+
+function easeInCubic(value: number): number {
+  return value * value * value;
+}
+
+function easeOutCubic(value: number): number {
+  const inverted = 1 - value;
+  return 1 - inverted * inverted * inverted;
 }
 
 export function pancakeKey(x: number, z: number): string {
@@ -320,7 +358,10 @@ function startMove(state: GameState, move: MoveAction, options: ActionOptions = 
     if (!lane) return state;
   }
   if (isGroundLane(lane) && (lane.blockers.includes(targetX) || lane.buildings.includes(targetX))) return state;
-  const baseDuration = move === "forward" ? PLAYER.hopDuration / FORWARD_MOVE_SPEED_MULTIPLIER : PLAYER.hopDuration;
+  const rampSpeedMultiplier = state.stage.mode === "chase" && Math.round(state.player.z) > SECOND_DIFFICULTY_RAMP_Z
+    ? POST_SECOND_RAMP_HOP_SPEED_MULTIPLIER
+    : 1;
+  const baseDuration = (move === "forward" ? PLAYER.hopDuration / FORWARD_MOVE_SPEED_MULTIPLIER : PLAYER.hopDuration) / rampSpeedMultiplier;
   const duration = options.cheatMode ? baseDuration / 3 : baseDuration;
   const stage = state.stage.lastEvent?.startsWith("Recovered from")
     ? { ...state.stage, lastEvent: undefined }
@@ -355,7 +396,7 @@ function advanceHop(state: GameState, delta: number): GameState {
   const maxZ = Math.max(state.player.maxZ, landedZ);
   const score = maxZ;
   const bestScore = Math.max(state.bestScore, score);
-  const collected = hop.kind === "hazardRecovery" || hop.kind === "summonBump"
+  const collected = hop.kind === "hazardRecovery" || hop.kind === "summonBump" || hop.kind === "targetPullback"
     ? { pancakes: state.collectedPancakes }
     : collectPancake(state, landedX, landedZ);
   if (bestScore > state.bestScore) writeBestScore(bestScore);
@@ -396,13 +437,25 @@ function updateIntroAfterPancakeCollect(state: GameState, collectedKey: string):
 
 function updateStageTimers(state: GameState): GameState {
   let next = state;
-  if (next.stage.mode === "postVictoryTutorial" && (next.stage.postVictoryStartedAt ?? Number.POSITIVE_INFINITY) + POST_VICTORY_AUTO_RESET_SECONDS <= next.time) {
-    return createInitialState(next.stageMap, next.runId + 1, Math.max(next.bestScore, next.score));
-  }
   if (next.stage.mode === "finalSequence" && next.stage.finalStartedAt !== undefined) {
     const fadeStartedAt = next.stage.finalFadeStartedAt ?? next.stage.finalStartedAt + FINAL_DIALOGUE_TOTAL_SECONDS + FINAL_FADE_DELAY_SECONDS;
     if (next.time >= fadeStartedAt + FINAL_FADE_SECONDS) {
-      return createInitialState(next.stageMap, next.runId + 1, Math.max(next.bestScore, next.score));
+      return {
+        ...next,
+        queuedMove: undefined,
+        crashReason: undefined,
+        player: { ...next.player, hop: undefined },
+        stage: {
+          ...next.stage,
+          mode: "postVictoryTutorial",
+          target: { ...next.stage.target, visible: false },
+          targetEscape: undefined,
+          targetPending: undefined,
+          targetRevealAt: undefined,
+          postVictoryStartedAt: next.time,
+          lastEvent: "Post Victory Credits Available",
+        },
+      };
     }
     if (next.stage.finalFadeStartedAt === undefined && next.time >= fadeStartedAt) {
       next = {
@@ -627,7 +680,7 @@ function updateRiverClearProgress(state: GameState): GameState {
     stage: {
       ...state.stage,
       firstRiverClearedAt: state.time,
-      lastEvent: "First river cleared",
+      lastEvent: state.stage.lastEvent === "Target missed" ? state.stage.lastEvent : "First river cleared",
     },
   };
 }
@@ -679,6 +732,25 @@ function firstSafeTargetPoint(state: GameState, z: number): GridPoint | undefine
   return undefined;
 }
 
+function targetMissPullbackPoint(state: GameState): GridPoint | undefined {
+  const target = state.stage.target;
+  const preferredXs = [...new Set([target.x, Math.round(state.player.x), ...xPriority(target.x)])];
+  for (let z = target.z - 1; z >= 0; z -= 1) {
+    const withoutPancake = firstSafeGroundPointAvoidingCollectibles(state, z, preferredXs);
+    if (withoutPancake) return withoutPancake;
+    const fallback = firstSafeGroundPoint(state, z, preferredXs);
+    if (fallback) return fallback;
+  }
+  return firstSafeGroundPoint(state, state.stage.playerStart.z, preferredXs) ?? stageStart(state);
+}
+
+function firstSafeGroundPointAvoidingCollectibles(state: GameState, z: number, preferredXs: readonly number[]): GridPoint | undefined {
+  for (const x of preferredXs) {
+    if (isSafeGroundPoint(state, { x, z }, { avoidCollectibles: true })) return { x, z };
+  }
+  return undefined;
+}
+
 function isSafeGroundPoint(state: GameState, point: GridPoint, options: { avoidCollectibles: boolean; avoidPlayer?: boolean }): boolean {
   if (point.x < GRID.minX || point.x > GRID.maxX || point.z < 0) return false;
   const lane = state.lanes.get(point.z);
@@ -719,15 +791,14 @@ function rewindTargetIfTooFar(state: GameState): GameState {
 
 function updateStageProgress(state: GameState): GameState {
   if (state.phase === "complete" || state.phase === "crashed") return state;
+  if (state.player.hop) return state;
   if (state.stage.mode !== "chase" || !state.stage.target.visible) return state;
   const playerX = Math.round(state.player.x);
   const playerZ = Math.round(state.player.z);
   const caughtTarget = playerX === state.stage.target.x && playerZ === state.stage.target.z;
-  const shouldAutoCatch = !caughtTarget
-    && state.stage.autoTargetCatchCount < TARGET_AUTO_CATCH_LIMIT
-    && playerZ - state.stage.target.z > TARGET_AUTO_CATCH_MAX_ROWS_BEHIND;
-  if (!caughtTarget && !shouldAutoCatch) return state;
-  const autoTargetCatchCount = shouldAutoCatch ? state.stage.autoTargetCatchCount + 1 : state.stage.autoTargetCatchCount;
+  const shouldPullBackToTarget = !caughtTarget && playerZ - state.stage.target.z > TARGET_AUTO_CATCH_MAX_ROWS_BEHIND;
+  if (shouldPullBackToTarget) return startTargetMissPullback(state);
+  if (!caughtTarget) return state;
   const nextTarget = findNextTargetSpawn(state);
   if (!nextTarget) return startFinalSequence(state);
   const history = [...state.stage.targetSpawnHistory, nextTarget];
@@ -744,16 +815,43 @@ function updateStageProgress(state: GameState): GameState {
       targetEscape: { x: state.stage.target.x, z: state.stage.target.z, startedAt: state.time },
       targetPending: nextTarget,
       targetRevealAt,
-      autoTargetCatchCount,
       introCameraHandoffStartedAt: shouldStartIntroHandoff ? state.time : state.stage.introCameraHandoffStartedAt,
       introCameraHandoffReleaseAt: shouldStartIntroHandoff ? targetRevealAt : state.stage.introCameraHandoffReleaseAt,
       targetSpawnHistory: history,
       catchCount: state.stage.catchCount + 1,
-      lastEvent: shouldAutoCatch
-        ? "Mr. Not So Awesome was pulled back into the chase"
-        : shouldStartIntroHandoff
-          ? "Mr. Not So Awesome is escaping"
-          : "Mr. Not So Awesome slipped ahead",
+      lastEvent: shouldStartIntroHandoff
+        ? "Mr. Not So Awesome is escaping"
+        : "Mr. Not So Awesome slipped ahead",
+    },
+  };
+}
+
+function startTargetMissPullback(state: GameState): GameState {
+  const pullback = targetMissPullbackPoint(state);
+  if (!pullback) return state;
+  return {
+    ...state,
+    queuedMove: undefined,
+    crashReason: undefined,
+    player: {
+      ...state.player,
+      hop: {
+        fromX: state.player.x,
+        fromZ: state.player.z,
+        toX: pullback.x,
+        toZ: pullback.z,
+        elapsed: 0,
+        duration: TARGET_MISS_PULLBACK_SECONDS,
+        kind: "targetPullback",
+      },
+    },
+    stage: {
+      ...state.stage,
+      target: { ...state.stage.target, visible: true },
+      targetEscape: undefined,
+      targetPending: undefined,
+      targetRevealAt: undefined,
+      lastEvent: "Target missed",
     },
   };
 }
