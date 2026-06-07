@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
+    "sites:check": "npm run build && node scripts/sites-static-checks.mjs",
     "test:stage-map": "node scripts/stage-map-checks.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
