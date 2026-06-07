@@ -400,7 +400,7 @@ function startMove(state: GameState, move: MoveAction, options: ActionOptions = 
   let targetZ = clamp(Math.round(state.player.z) + delta.dz, 0, maxLaneZ);
   let lane = state.lanes.get(targetZ);
   if (!lane) return state;
-  if (state.stage.mode === "introPancakes" && !options.cheatMode && lane.kind === "river") {
+  if (!options.cheatMode && lane.kind === "river" && isFirstStageRiverLocked(state)) {
     targetX = Math.round(state.player.x);
     targetZ = Math.round(state.player.z);
     lane = state.lanes.get(targetZ);
@@ -432,6 +432,11 @@ function startMove(state: GameState, move: MoveAction, options: ActionOptions = 
       },
     },
   };
+}
+
+function isFirstStageRiverLocked(state: GameState): boolean {
+  return state.stage.mode === "introPancakes"
+    || (state.stage.mode === "chase" && state.stage.catchCount === 0 && !state.stage.introCameraHandoffDone);
 }
 
 function advanceHop(state: GameState, delta: number): GameState {

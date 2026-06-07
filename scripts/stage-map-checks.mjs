@@ -736,6 +736,26 @@ try {
       && moved.stage.mode === "introPancakes"
       && approx(moved.player.hop.duration, 0.19 / 1.1);
   });
+  check("pre-first-catch chase keeps river and log lanes locked", () => {
+    const state = simulation.createInitialState(introBlockedRiverTown, 0, 0);
+    const staged = {
+      ...state,
+      phase: "running",
+      stage: {
+        ...state.stage,
+        mode: "chase",
+        target: { x: 0, z: 0, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 0 }],
+        catchCount: 0,
+        introCameraHandoffDone: false,
+      },
+    };
+    const moved = simulation.applyAction(staged, "forward");
+    return moved.player.hop?.toZ === 0
+      && moved.player.z === 0
+      && moved.stage.mode === "chase"
+      && moved.stage.catchCount === 0;
+  });
   check("hero hop speeds up after the second difficulty ramp", () => {
     const state = simulation.createInitialState(stageMap.baselineStageMap(), 0, 0);
     const beforeRamp = {
