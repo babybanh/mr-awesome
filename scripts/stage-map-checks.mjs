@@ -1220,6 +1220,10 @@ try {
       && panel.speaker === "B"
       && panel.text === "No! I forgot to build an exit!";
   });
+  check("final first line holds through the two-second final theme cue", () => (
+    approx(dialogue.FINAL_LINE_DURATIONS[0], 2.0)
+    && approx(dialogue.FINAL_LINE_DURATIONS[0] + dialogue.FINAL_LINE_GAP_SECONDS, 2.4)
+  ));
   check("final ending fades to black and restarts from the beginning", () => {
     const state = simulation.createInitialState(riverIntroTown, 0, 0);
     let staged = {
@@ -1550,7 +1554,8 @@ async function transpile(sourcePath, outName) {
     },
   }).outputText
     .replaceAll('from "./types"', 'from "./types.mjs"')
-    .replaceAll('from "./stageMap"', 'from "./stageMap.mjs"');
+    .replaceAll('from "./stageMap"', 'from "./stageMap.mjs"')
+    .replaceAll('from "./dialogue"', 'from "./dialogue.mjs"');
   await writeFile(join(tmp, outName), output);
 }
 

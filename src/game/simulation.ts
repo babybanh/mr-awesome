@@ -1,5 +1,6 @@
 import { GRID, PLAYER, type GameAction, type GamePhase, type GameState, type GridPoint, type LaneState, type MoveAction, type MovingSpan, type StageDefinition } from "./types";
 import { baselineStageMap, parseStageMap } from "./stageMap";
+import { FINAL_LINE_DURATIONS, FINAL_LINE_GAP_SECONDS } from "./dialogue";
 
 const BEST_SCORE_KEY = "awesome-superhero.best-score";
 const ROAD_COLORS = {
@@ -21,8 +22,6 @@ const TARGET_CATCH_HIDE_SECONDS = 0.62;
 const FIRST_CATCH_CAMERA_HANDOFF_SECONDS = 1.2;
 const REVEAL_LINE_DURATIONS = [3.65, 3.3, 3.05] as const;
 const REVEAL_TOTAL_SECONDS = REVEAL_LINE_DURATIONS.reduce((total, duration) => total + duration, 0);
-const FINAL_LINE_DURATIONS = [3.0, 2.7, 3.7, 3.4] as const;
-const FINAL_LINE_GAP_SECONDS = 0.4;
 const FINAL_DIALOGUE_TOTAL_SECONDS = FINAL_LINE_DURATIONS.reduce(
   (total, duration, index) => total + duration + (index < FINAL_LINE_DURATIONS.length - 1 ? FINAL_LINE_GAP_SECONDS : 0),
   0,

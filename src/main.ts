@@ -1300,13 +1300,14 @@ function updateUi(): void {
   const nextDialogueKey = `${nextDialogue.speaker}:${nextDialogue.text}`;
   if (nextDialogueKey !== lastDialogueKey) {
     const isOpeningTutorialDialogue = nextDialogue.eventType === "OPENING_TUTORIAL";
+    const isFirstFinalEndingLine = nextDialogue.eventType === "FINAL_ENDING" && lastDialogueKey === "";
     const suppressBootPressAnimation = nextDialogue.eventType === "OPENING_TUTORIAL"
       && openingTutorialAnimating
       && !openingTutorialSuccessVisible;
     elements.message.textContent = nextDialogue.text;
     elements.dialogueStrip.classList.remove("is-dialogue-entering");
     elements.message.classList.remove("is-message-entering");
-    if (!suppressBootPressAnimation && !isOpeningTutorialDialogue) {
+    if (!suppressBootPressAnimation && !isOpeningTutorialDialogue && !isFirstFinalEndingLine) {
       void elements.dialogueStrip.offsetWidth;
       elements.dialogueStrip.classList.add("is-dialogue-entering");
       elements.message.classList.add("is-message-entering");
