@@ -154,11 +154,10 @@ const PALETTE = {
 const BILLBOARD_COPY = [
   ["WELCOME TO", "AWESOME TOWN"],
   ["PANCAKE", "PLAZA"],
-  ["RIVERFRONT", "WAY"],
-  ["GATOR", "CROSSING"],
+  ["RAILROAD", "ROW"],
   ["BIG LAKES", "DISTRICT"],
-  ["BUSY ROAD", "AVENUE"],
-  ["CITY LIMITS", "AHEAD"],
+  ["LOG", "LAGOON"],
+  ["FINAL BLOCK", "AHEAD"],
 ] as const;
 
 const MR_AWESOME_PLAYER_SCALE = 0.52;

@@ -34,9 +34,11 @@ const REVEAL_CONVERSATION_INPUT_ADVANCE_SECONDS = 0.85;
 const HAZARD_RESPAWN_GROUND_ROWS_BACK = 3;
 const TARGET_MIN_ADVANCE_ROWS = 12;
 const TARGET_MAX_ADVANCE_ROWS = 20;
+const TARGET_CATCH_ADVANCE_ROW_BONUS_INTERVAL = 4;
+const TARGET_CATCH_ADVANCE_ROW_BONUS_MAX = 6;
 const TARGET_AUTO_CATCH_MAX_ROWS_BEHIND = 7;
 const TARGET_MISS_PULLBACK_SECONDS = 0.72;
-const PREFINAL_TARGET_Z = 354;
+const PREFINAL_TARGET_Z = 315;
 const ENDING_CHEAT_PLAYER_ROWS_BEHIND = 20;
 const TARGET_CENTER_PRIORITY = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5] as const;
 const POST_NICE_TRY_BILLBOARD_Z = 70;
@@ -764,15 +766,22 @@ function targetAdvanceMultiplier(state: GameState): number {
 }
 
 function targetMinAdvanceRows(state: GameState): number {
-  return Math.round(TARGET_MIN_ADVANCE_ROWS * targetAdvanceMultiplier(state));
+  return Math.round(TARGET_MIN_ADVANCE_ROWS * targetAdvanceMultiplier(state)) + targetCatchAdvanceRowBonus(state);
 }
 
 function targetMaxAdvanceRows(state: GameState): number {
-  return Math.round(TARGET_MAX_ADVANCE_ROWS * targetAdvanceMultiplier(state));
+  return Math.round(TARGET_MAX_ADVANCE_ROWS * targetAdvanceMultiplier(state)) + targetCatchAdvanceRowBonus(state);
 }
 
 function targetCatchHideSeconds(state: GameState): number {
-  return TARGET_CATCH_HIDE_SECONDS * targetAdvanceMultiplier(state);
+  return TARGET_CATCH_HIDE_SECONDS * (targetMaxAdvanceRows(state) / TARGET_MAX_ADVANCE_ROWS);
+}
+
+function targetCatchAdvanceRowBonus(state: GameState): number {
+  return Math.min(
+    TARGET_CATCH_ADVANCE_ROW_BONUS_MAX,
+    Math.floor(state.stage.catchCount / TARGET_CATCH_ADVANCE_ROW_BONUS_INTERVAL),
+  );
 }
 
 function shouldUsePrefinalTarget(state: GameState): boolean {

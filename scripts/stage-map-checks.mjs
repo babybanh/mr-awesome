@@ -400,12 +400,12 @@ try {
   ]);
 
   check("baseline map parses", () => stageMap.parseStageMap(stageMap.baselineStageMap()).ok);
-  check("v111 compact baseline map parses and serializes", () => {
+  check("v112 compact baseline map parses and serializes", () => {
     const result = stageMap.parseStageMap(stageMap.baselineStageMap());
     const serialized = result.stage ? stageMap.serializeStageMap(result.stage) : "";
     return result.ok
-      && result.stage?.name === "v111_cut_99_lane_candidate"
-      && serialized.includes("z=363 W<")
+      && result.stage?.name === "v112_cut_138_lane_candidate"
+      && serialized.includes("z=324 W<")
       && serialized.includes("z=00 G");
   });
   check("compact baseline keeps planned billboard rows", () => {
@@ -415,7 +415,7 @@ try {
       .map((object) => object.z)
       .sort((a, b) => a - b)
       .join(",");
-    return billboardRows === "15,70,91,127,150,215,274";
+    return billboardRows === "15,70,127,150,176,235";
   });
   check("baseline multi-row river chunks alternate direction", () => {
     const result = stageMap.parseStageMap(stageMap.baselineStageMap());
@@ -586,9 +586,9 @@ try {
     const lateTrain = result.stage?.lanes.get(138);
     const bigLakesRoad = result.stage?.lanes.get(152);
     const bigLakesTrain = result.stage?.lanes.get(160);
-    const bigLakesRiver = result.stage?.lanes.get(219);
-    const beforeFinalBillboardRoad = result.stage?.lanes.get(273);
-    const afterFinalBillboardRoad = result.stage?.lanes.get(277);
+    const bigLakesRiver = result.stage?.lanes.get(180);
+    const beforeFinalBillboardRoad = result.stage?.lanes.get(234);
+    const afterFinalBillboardRoad = result.stage?.lanes.get(238);
     return beforeRoad?.kind === "road"
       && afterRoad?.kind === "road"
       && afterTrain?.kind === "train"
@@ -991,9 +991,9 @@ try {
     };
     const ticked = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
     return ticked.stage.targetPending !== undefined
-      && ticked.stage.targetPending.z >= 174
-      && ticked.stage.targetPending.z <= 188
-      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * 1.35 * 1.35)
+      && ticked.stage.targetPending.z >= 176
+      && ticked.stage.targetPending.z <= 190
+      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * (38 / 20))
       && ticked.stage.catchCount === 9;
   });
   check("target catch starts spawning farther after the first ramp", () => {
@@ -1015,8 +1015,38 @@ try {
     return ticked.stage.targetPending !== undefined
       && ticked.stage.targetPending.z >= 92
       && ticked.stage.targetPending.z <= 103
-      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * 1.35)
+      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * (27 / 20))
       && ticked.stage.catchCount === 4;
+  });
+  check("target spawn distance increases gently with catch count", () => {
+    const state = simulation.createInitialState(stageMap.baselineStageMap(), 0, 0);
+    const earlyCatch = {
+      ...state,
+      phase: "running",
+      player: { x: 0, z: 76, maxZ: 76 },
+      stage: {
+        ...state.stage,
+        mode: "chase",
+        target: { x: 0, z: 76, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 76 }],
+        catchCount: 3,
+        introCameraHandoffDone: true,
+      },
+    };
+    const laterCatch = {
+      ...earlyCatch,
+      stage: {
+        ...earlyCatch.stage,
+        catchCount: 4,
+      },
+    };
+    const early = simulation.tickGame(earlyCatch, 0.05, { hazardsEnabled: false });
+    const later = simulation.tickGame(laterCatch, 0.05, { hazardsEnabled: false });
+    return early.stage.targetPending !== undefined
+      && later.stage.targetPending !== undefined
+      && later.stage.targetPending.z > early.stage.targetPending.z
+      && later.stage.targetPending.z >= 96
+      && later.stage.catchCount === 5;
   });
   check("first target catch blocks movement until camera handoff releases", () => {
     const state = simulation.createInitialState(introFivePancakeTown, 0, 0);
@@ -1101,18 +1131,18 @@ try {
       && panel.eventType === "TARGET_MISSED"
       && missLines.has(panel.text);
   });
-  check("near-final target respawns at z354 before the final conversation", () => {
+  check("near-final target respawns at z315 before the final conversation", () => {
     const state = simulation.createInitialState(stageMap.baselineStageMap(), 0, 0);
     const staged = {
       ...state,
       phase: "running",
-      player: { x: 0, z: 334, maxZ: 334 },
+      player: { x: 0, z: 295, maxZ: 295 },
       stage: {
         ...state.stage,
         mode: "chase",
-        target: { x: 0, z: 334, visible: true },
-        targetSpawnHistory: [{ x: 0, z: 334 }],
-        catchCount: 22,
+        target: { x: 0, z: 295, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 295 }],
+        catchCount: 18,
         introCameraHandoffDone: true,
       },
     };
@@ -1120,10 +1150,10 @@ try {
     const finalCatch = simulation.tickGame(
       {
         ...ticked,
-        player: { x: ticked.stage.targetPending?.x ?? 0, z: 354, maxZ: 354 },
+        player: { x: ticked.stage.targetPending?.x ?? 0, z: 315, maxZ: 315 },
         stage: {
           ...ticked.stage,
-          target: { x: ticked.stage.targetPending?.x ?? 0, z: 354, visible: true },
+          target: { x: ticked.stage.targetPending?.x ?? 0, z: 315, visible: true },
           targetPending: undefined,
           targetRevealAt: undefined,
           targetEscape: undefined,
@@ -1132,7 +1162,7 @@ try {
       0.05,
       { hazardsEnabled: false },
     );
-    return ticked.stage.targetPending?.z === 354
+    return ticked.stage.targetPending?.z === 315
       && ticked.stage.targetPending.x === 0
       && finalCatch.stage.mode === "finalSequence"
       && finalCatch.stage.finalStartedAt !== undefined;
@@ -1229,7 +1259,7 @@ try {
       && jumped.player.hop === undefined
       && jumped.queuedMove === undefined
       && jumped.stage.target.visible === true
-      && jumped.stage.target.z === 354
+      && jumped.stage.target.z === 315
       && jumped.player.z < jumped.stage.target.z
       && jumped.stage.target.z - jumped.player.z <= 20
       && jumped.stage.lastEvent === "Cheat Ending Jump";
