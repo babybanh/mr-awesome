@@ -145,9 +145,9 @@ z=290 W< | log=M speed=F gap=M |
 z=289 W> | log=S speed=F gap=S |
 z=288 W< | log=M speed=M gap=M |
 z=287 W> | log=M speed=S gap=M |
-z=286 G  | . . B6 b6 . . . . B8 b8 . . . |
-z=285 G  | #3 . b6 b6 . . . . b8 b8 . #3 . |
-z=284 G  | . . b6 b6 . p1 . p1 b8 b8 . . . |
+z=286 G  | #1 #1 B8 b8 #1 . . #1 B1 b1 . #1 #1 |
+z=285 G  | #1 #1 b8 b8 #1 . . #1 b1 b1 . #1 #1 |
+z=284 G  | #1 #1 b8 b8 #1 p1 . p1 b1 b1 . #1 #1 |
 z=283 R> | vehicle=S speed=F gap=L density=L cover=none color=mixed seed=51 |
 z=282 R< | vehicle=S speed=F gap=M density=L cover=none color=mixed seed=52 |
 z=281 R> | vehicle=M speed=F gap=M density=L cover=none color=mixed seed=53 |
@@ -156,10 +156,10 @@ z=279 R> | vehicle=M speed=M gap=L density=L cover=none color=mixed seed=55 |
 z=278 R< | vehicle=S speed=S gap=L density=L cover=none color=mixed seed=54 |
 z=277 R> | vehicle=M speed=S gap=L density=L cover=none color=mixed seed=55 |
 z=276 G  | #3 . . . . . . p1 . . . . #3 |
-z=275 G  | B7 b7 b7 b7 . . . . . . . . . |
-z=274 G  | b7 b7 b7 b7 #3 . . . #3 B5 b5 b5 #3 |
-z=273 G  | b7 b7 b7 b7 . . p1 . . b5 b5 b5 . |
-z=272 G  | b7 b7 b7 b7 #3 . . . #3 b5 b5 b5 #3 |
+z=275 D  | . . . B6 b6 . . . B8 b8 . . . |
+z=274 G  | #4 . . b6 b6 . . . b8 b8 . . #4 |
+z=273 D  | . . #4 b6 b6 #4 . #4 b8 b8 #4 . . |
+z=272 G  | . . . p1 . . . . . p1 . . . |
 z=271 W> | log=M speed=S gap=S |
 z=270 W< | log=M speed=M gap=M |
 z=269 W> | log=L speed=S gap=S |
@@ -168,9 +168,9 @@ z=267 D  | . #4 . . . p1 . . . . . #4 . |
 z=266 W< | log=M speed=M gap=S |
 z=265 W> | log=L speed=M gap=M |
 z=264 W< | log=L speed=M gap=L |
-z=263 G  | . B1 b1 . . . p1 . . B2 b2 b2 . |
-z=262 G  | . b1 b1 . #4 . . . #4 b2 b2 b2 . |
-z=261 G  | . b1 b1 . . p1 . p1 . b2 b2 b2 . |
+z=263 G  | . . . B2 b2 b2 p1 . B1 b1 . . . |
+z=262 G  | #1 #1 #1 b2 b2 b2 . . b1 b1 #1 #1 #1 |
+z=261 G  | #1 #1 #1 b2 b2 b2 p1 #1 b1 b1 #1 #1 #1 |
 z=260 G  | #4 . . . . . . . . . . . #4 |
 z=259 R< | vehicle=M speed=S gap=L density=H cover=none color=mixed seed=32 |
 z=258 R< | vehicle=M speed=S gap=L density=M cover=none color=mixed seed=32 |

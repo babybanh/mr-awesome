@@ -968,8 +968,8 @@ try {
       && ticked.stage.target.visible === false
       && ticked.stage.targetEscape?.z === 8
       && ticked.stage.targetPending
-      && ticked.stage.targetPending.z >= 20
-      && ticked.stage.targetPending.z <= 25
+      && ticked.stage.targetPending.z >= 22
+      && ticked.stage.targetPending.z <= 31
       && ticked.stage.introCameraHandoffStartedAt !== undefined
       && ticked.stage.introCameraHandoffReleaseAt !== undefined
       && ticked.stage.catchCount === 1;
@@ -991,9 +991,9 @@ try {
     };
     const ticked = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
     return ticked.stage.targetPending !== undefined
-      && ticked.stage.targetPending.z >= 176
-      && ticked.stage.targetPending.z <= 190
-      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * (40 / 20))
+      && ticked.stage.targetPending.z >= 186
+      && ticked.stage.targetPending.z <= 202
+      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * (50 / 23))
       && ticked.stage.catchCount === 9;
   });
   check("target catch starts spawning farther after the first ramp", () => {
@@ -1013,9 +1013,9 @@ try {
     };
     const ticked = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
     return ticked.stage.targetPending !== undefined
-      && ticked.stage.targetPending.z >= 92
-      && ticked.stage.targetPending.z <= 103
-      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * (28 / 20))
+      && ticked.stage.targetPending.z >= 97
+      && ticked.stage.targetPending.z <= 109
+      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * (33 / 23))
       && ticked.stage.catchCount === 4;
   });
   check("target spawn distance increases gently with catch count", () => {
@@ -1045,8 +1045,8 @@ try {
     return early.stage.targetPending !== undefined
       && later.stage.targetPending !== undefined
       && later.stage.targetPending.z > early.stage.targetPending.z
-      && later.stage.targetPending.z >= 96
-      && approx((later.stage.targetRevealAt ?? 0) - later.time, 0.62 * (28 / 20))
+      && later.stage.targetPending.z >= 97
+      && approx((later.stage.targetRevealAt ?? 0) - later.time, 0.62 * (33 / 23))
       && later.stage.catchCount === 3;
   });
   check("target spawns skip billboard rows and the two rows behind them", () => {
@@ -1266,8 +1266,8 @@ try {
     const advanced = simulation.advanceTargetToNextSpawn(staged);
     return advanced.stage.mode === "chase"
       && advanced.stage.target.visible === true
-      && advanced.stage.target.z >= 92
-      && advanced.stage.target.z <= 103
+      && advanced.stage.target.z >= 97
+      && advanced.stage.target.z <= 109
       && advanced.stage.catchCount === staged.stage.catchCount
       && advanced.stage.targetSpawnHistory.length === 2
       && advanced.stage.lastEvent === "Cheat Target Advanced";

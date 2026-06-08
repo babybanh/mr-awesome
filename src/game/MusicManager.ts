@@ -33,11 +33,14 @@ const VILLAIN_REVEAL_GAP_SECONDS = 1;
 const ROUTE_THEME_DELAY_SECONDS = 1;
 const ROUTE_THEME_LOOP_GAP_SECONDS = 0;
 const FINAL_THEME_SILENCE_SECONDS = 3.3;
+const INTRO_THEME_START_DELAY_MS = 320;
 
 export class MusicManager {
   private readonly tracks: Record<MusicTrackId, TrackState>;
   private unlocked = false;
   private resumeAfterVisible = false;
+  private introStartTimer: number | undefined;
+  private introStartScheduledRunId: number | undefined;
   private lastRunId = -1;
   private villainStartedRunId: number | undefined;
   private villainScheduledRunId: number | undefined;
@@ -65,16 +68,6 @@ export class MusicManager {
     if (this.unlocked) return;
     this.unlocked = true;
     if (this.lastState) this.sync(this.lastState, this.lastOptions);
-  }
-
-  warmIntroTheme(): void {
-    if (!this.unlocked || !this.enabled) return;
-    const track = this.tracks.heroIntro;
-    if (track.playing && !track.audio.paused) return;
-    track.audio.loop = true;
-    track.audio.currentTime = 0;
-    track.audio.volume = 0;
-    void this.safePlay("heroIntro");
   }
 
   setEnabled(enabled: boolean): void {
@@ -109,7 +102,8 @@ export class MusicManager {
       this.routeEndedAt = Number.POSITIVE_INFINITY;
       this.stopTrack("villainReveal");
       this.stopTrack("routeTheme");
-      if (state.phase === "running") this.playLoop("heroIntro");
+      if (state.phase === "running") this.scheduleIntroLoopStart(state.runId);
+      else this.clearIntroStartTimer();
       return;
     }
 
@@ -165,6 +159,7 @@ export class MusicManager {
 
   dispose(): void {
     document.removeEventListener("visibilitychange", this.handleVisibility);
+    this.clearIntroStartTimer();
     for (const track of Object.values(this.tracks)) {
       track.audio.pause();
       track.audio.src = "";
@@ -188,6 +183,7 @@ export class MusicManager {
 
   private resetRun(runId: number): void {
     this.lastRunId = runId;
+    this.clearIntroStartTimer();
     this.villainStartedRunId = undefined;
     this.villainScheduledRunId = undefined;
     this.finalVillainStartedRunId = undefined;
@@ -201,6 +197,7 @@ export class MusicManager {
   }
 
   private pauseAllNow(): void {
+    this.clearIntroStartTimer();
     for (const track of Object.values(this.tracks)) {
       if (track.audio.volume !== 0) track.audio.volume = 0;
       if (!track.audio.paused) track.audio.pause();
@@ -217,6 +214,33 @@ export class MusicManager {
     if (this.enabled && this.resumeAfterVisible && this.lastState) this.sync(this.lastState, this.lastOptions);
     this.resumeAfterVisible = false;
   };
+
+  private scheduleIntroLoopStart(runId: number): void {
+    const track = this.tracks.heroIntro;
+    if (track.playing && !track.audio.paused) {
+      track.audio.volume = TRACKS.heroIntro.volume;
+      return;
+    }
+    if (this.introStartTimer !== undefined && this.introStartScheduledRunId === runId) return;
+    this.clearIntroStartTimer();
+    this.introStartScheduledRunId = runId;
+    this.introStartTimer = window.setTimeout(() => {
+      this.introStartTimer = undefined;
+      this.introStartScheduledRunId = undefined;
+      const state = this.lastState;
+      if (!this.unlocked || !this.enabled || !state) return;
+      if (state.runId !== runId || state.stage.mode !== "introPancakes" || state.phase !== "running") return;
+      this.playLoop("heroIntro");
+    }, INTRO_THEME_START_DELAY_MS);
+  }
+
+  private clearIntroStartTimer(): void {
+    if (this.introStartTimer !== undefined) {
+      window.clearTimeout(this.introStartTimer);
+      this.introStartTimer = undefined;
+    }
+    this.introStartScheduledRunId = undefined;
+  }
 
   private playLoop(id: "heroIntro" | "routeTheme"): void {
     const track = this.tracks[id];
