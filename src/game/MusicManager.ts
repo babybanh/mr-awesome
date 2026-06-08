@@ -67,6 +67,16 @@ export class MusicManager {
     if (this.lastState) this.sync(this.lastState, this.lastOptions);
   }
 
+  warmIntroTheme(): void {
+    if (!this.unlocked || !this.enabled) return;
+    const track = this.tracks.heroIntro;
+    if (track.playing && !track.audio.paused) return;
+    track.audio.loop = true;
+    track.audio.currentTime = 0;
+    track.audio.volume = 0;
+    void this.safePlay("heroIntro");
+  }
+
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     if (!enabled) {

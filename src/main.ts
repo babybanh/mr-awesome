@@ -951,6 +951,11 @@ function unlockMusic(): void {
   sfx.unlock();
 }
 
+function warmOpeningTutorialAudio(): void {
+  unlockMusic();
+  music.warmIntroTheme();
+}
+
 function syncMusicNow(): void {
   music.sync(state, { cheatMode });
 }
@@ -1358,6 +1363,7 @@ function shouldShowOpeningTutorial(): boolean {
 function handleOpeningTutorialStart(): boolean {
   if (!shouldShowOpeningTutorial()) return false;
   if (openingTutorialAnimating) return true;
+  warmOpeningTutorialAudio();
   const inputBeforeBootDialogue = bootPhase !== "dialogue" || lastDialogueKey === "";
   if (bootQuietTimer !== undefined) {
     window.clearTimeout(bootQuietTimer);
