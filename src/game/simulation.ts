@@ -34,8 +34,9 @@ const REVEAL_CONVERSATION_INPUT_ADVANCE_SECONDS = 0.85;
 const HAZARD_RESPAWN_GROUND_ROWS_BACK = 3;
 const TARGET_MIN_ADVANCE_ROWS = 12;
 const TARGET_MAX_ADVANCE_ROWS = 20;
-const TARGET_CATCH_ADVANCE_ROW_BONUS_INTERVAL = 4;
+const TARGET_CATCH_ADVANCE_ROW_BONUS_INTERVAL = 2;
 const TARGET_CATCH_ADVANCE_ROW_BONUS_MAX = 6;
+const TARGET_BILLBOARD_BLIND_SPOT_ROWS = 2;
 const TARGET_AUTO_CATCH_MAX_ROWS_BEHIND = 7;
 const TARGET_MISS_PULLBACK_SECONDS = 0.72;
 const PREFINAL_TARGET_Z = 315;
@@ -794,10 +795,19 @@ function shouldUsePrefinalTarget(state: GameState): boolean {
 }
 
 function firstSafeTargetPoint(state: GameState, z: number): GridPoint | undefined {
+  if (isBillboardBlindSpotRow(state, z)) return undefined;
   for (const x of TARGET_CENTER_PRIORITY) {
     if (isSafeGroundPoint(state, { x, z }, { avoidCollectibles: true, avoidPlayer: true })) return { x, z };
   }
   return undefined;
+}
+
+function isBillboardBlindSpotRow(state: GameState, z: number): boolean {
+  return state.stageObjects.some((object) => (
+    object.kind === "billboard"
+    && z >= object.z
+    && z <= object.z + TARGET_BILLBOARD_BLIND_SPOT_ROWS
+  ));
 }
 
 function findLastSafeTargetPoint(state: GameState): GridPoint | undefined {

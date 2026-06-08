@@ -993,7 +993,7 @@ try {
     return ticked.stage.targetPending !== undefined
       && ticked.stage.targetPending.z >= 176
       && ticked.stage.targetPending.z <= 190
-      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * (38 / 20))
+      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * (40 / 20))
       && ticked.stage.catchCount === 9;
   });
   check("target catch starts spawning farther after the first ramp", () => {
@@ -1015,7 +1015,7 @@ try {
     return ticked.stage.targetPending !== undefined
       && ticked.stage.targetPending.z >= 92
       && ticked.stage.targetPending.z <= 103
-      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * (27 / 20))
+      && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * (28 / 20))
       && ticked.stage.catchCount === 4;
   });
   check("target spawn distance increases gently with catch count", () => {
@@ -1029,7 +1029,7 @@ try {
         mode: "chase",
         target: { x: 0, z: 76, visible: true },
         targetSpawnHistory: [{ x: 0, z: 76 }],
-        catchCount: 3,
+        catchCount: 1,
         introCameraHandoffDone: true,
       },
     };
@@ -1037,7 +1037,7 @@ try {
       ...earlyCatch,
       stage: {
         ...earlyCatch.stage,
-        catchCount: 4,
+        catchCount: 2,
       },
     };
     const early = simulation.tickGame(earlyCatch, 0.05, { hazardsEnabled: false });
@@ -1046,7 +1046,28 @@ try {
       && later.stage.targetPending !== undefined
       && later.stage.targetPending.z > early.stage.targetPending.z
       && later.stage.targetPending.z >= 96
-      && later.stage.catchCount === 5;
+      && approx((later.stage.targetRevealAt ?? 0) - later.time, 0.62 * (28 / 20))
+      && later.stage.catchCount === 3;
+  });
+  check("target spawns skip billboard rows and the two rows behind them", () => {
+    const state = simulation.createInitialState(stageMap.baselineStageMap(), 0, 0);
+    const staged = {
+      ...state,
+      phase: "running",
+      player: { x: 0, z: 109, maxZ: 109 },
+      stage: {
+        ...state.stage,
+        mode: "chase",
+        target: { x: 0, z: 109, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 109 }],
+        catchCount: 0,
+        introCameraHandoffDone: true,
+      },
+    };
+    const ticked = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
+    return ticked.stage.targetPending !== undefined
+      && ![127, 128, 129].includes(ticked.stage.targetPending.z)
+      && ticked.stage.targetPending.z === 130;
   });
   check("first target catch blocks movement until camera handoff releases", () => {
     const state = simulation.createInitialState(introFivePancakeTown, 0, 0);
