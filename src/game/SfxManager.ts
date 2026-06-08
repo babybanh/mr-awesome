@@ -36,6 +36,8 @@ export class SfxManager {
   private lastPickupSoundAt = -Infinity;
   private lastDialogueBlipAt = -Infinity;
   private enabled = true;
+  private fileSfxPrimeTimer: number | undefined;
+  private fileSfxPrimed = false;
 
   unlock(): void {
     if (!this.context) {
@@ -45,7 +47,7 @@ export class SfxManager {
     }
     this.unlocked = true;
     if (this.context.state === "suspended") void this.context.resume();
-    this.primeFileSfx();
+    this.scheduleFileSfxPrime();
   }
 
   setEnabled(enabled: boolean): void {
@@ -104,12 +106,17 @@ export class SfxManager {
 
   dispose(): void {
     void this.context?.close();
+    if (this.fileSfxPrimeTimer !== undefined) {
+      window.clearTimeout(this.fileSfxPrimeTimer);
+      this.fileSfxPrimeTimer = undefined;
+    }
     for (const player of this.filePlayers.values()) {
       player.pause();
       player.src = "";
     }
     this.filePlayers.clear();
     this.context = undefined;
+    this.fileSfxPrimed = false;
   }
 
   playDialogueBlip(speaker: DialogueSpeaker, gameTime: number): void {
@@ -218,7 +225,17 @@ export class SfxManager {
     source.start(start);
   }
 
+  private scheduleFileSfxPrime(): void {
+    if (this.fileSfxPrimed || this.fileSfxPrimeTimer !== undefined) return;
+    this.fileSfxPrimeTimer = window.setTimeout(() => {
+      this.fileSfxPrimeTimer = undefined;
+      this.primeFileSfx();
+    }, 700);
+  }
+
   private primeFileSfx(): void {
+    if (this.fileSfxPrimed) return;
+    this.fileSfxPrimed = true;
     for (const key of Object.keys(FILE_SFX_PATHS) as FileSfxKey[]) {
       const player = this.getFilePlayer(key);
       if (!player) continue;

@@ -317,6 +317,7 @@ export class ThreeStageRenderer {
   private cacheRunId = -1;
   private cameraFocusX = 0;
   private cameraFocusZ = 6;
+  private finalCameraLock: { runId: number; x: number; z: number } | undefined;
   private activeCameraPreset: CameraPresetId = DEFAULT_CAMERA_PRESET;
   private cameraZoomPercent = DEFAULT_CAMERA_ZOOM_PERCENT;
   private appliedCameraZoomPercent = DEFAULT_CAMERA_ZOOM_PERCENT;
@@ -387,11 +388,19 @@ export class ThreeStageRenderer {
     if (state.runId !== this.lastRunId) {
       this.cameraFocusX = targetCameraFocusX(player.x, state, useStageCamera);
       this.cameraFocusZ = targetCameraFocusZ(player.z, state, useStageCamera);
+      this.finalCameraLock = undefined;
       this.lastRunId = state.runId;
     }
+    if (state.stage.mode !== "finalSequence" || !useStageCamera) {
+      this.finalCameraLock = undefined;
+    } else if (this.finalCameraLock?.runId !== state.runId) {
+      this.finalCameraLock = { runId: state.runId, x: this.cameraFocusX, z: this.cameraFocusZ };
+    }
+    const targetFocusX = this.finalCameraLock?.x ?? targetCameraFocusX(player.x, state, useStageCamera);
+    const targetFocusZ = this.finalCameraLock?.z ?? targetCameraFocusZ(player.z, state, useStageCamera);
     const alpha = 1 - Math.exp(-deltaSeconds / CAMERA_SPEC.smoothingSeconds);
-    this.cameraFocusX = lerp(this.cameraFocusX, targetCameraFocusX(player.x, state, useStageCamera), alpha);
-    this.cameraFocusZ = lerp(this.cameraFocusZ, targetCameraFocusZ(player.z, state, useStageCamera), alpha);
+    this.cameraFocusX = lerp(this.cameraFocusX, targetFocusX, alpha);
+    this.cameraFocusZ = lerp(this.cameraFocusZ, targetFocusZ, alpha);
     this.positionCamera();
     this.prepareStageCaches(state);
     const renderWindow = this.visibleRenderWindow();

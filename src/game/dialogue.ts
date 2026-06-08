@@ -612,7 +612,7 @@ export class DialogueDirector {
 
     if (isFirstCatchHandoff(state)) {
       this.active = undefined;
-      return panelFromLine(line("B", FIRST_CATCH_LINES[0], 95, "FIRST_CATCH_HANDOFF", 2.6, "instruction"), state.time + 0.3);
+      return panelFromLine(line("B", FIRST_CATCH_LINES[0], 95, "FIRST_CATCH_HANDOFF", 2.86, "instruction"), state.time + 0.3);
     }
 
     const eventLine = this.eventLine(previous, state);
