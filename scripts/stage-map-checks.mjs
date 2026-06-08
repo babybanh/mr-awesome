@@ -400,13 +400,22 @@ try {
   ]);
 
   check("baseline map parses", () => stageMap.parseStageMap(stageMap.baselineStageMap()).ok);
-  check("v110B baseline map parses and serializes", () => {
+  check("v111 compact baseline map parses and serializes", () => {
     const result = stageMap.parseStageMap(stageMap.baselineStageMap());
     const serialized = result.stage ? stageMap.serializeStageMap(result.stage) : "";
     return result.ok
-      && result.stage?.name === "v110B_apartment_shop_final_candidate"
-      && serialized.includes("z=462 W<")
+      && result.stage?.name === "v111_cut_99_lane_candidate"
+      && serialized.includes("z=363 W<")
       && serialized.includes("z=00 G");
+  });
+  check("compact baseline keeps planned billboard rows", () => {
+    const result = stageMap.parseStageMap(stageMap.baselineStageMap());
+    const billboardRows = result.stage?.objects
+      .filter((object) => object.kind === "billboard")
+      .map((object) => object.z)
+      .sort((a, b) => a - b)
+      .join(",");
+    return billboardRows === "15,70,91,127,150,215,274";
   });
   check("baseline multi-row river chunks alternate direction", () => {
     const result = stageMap.parseStageMap(stageMap.baselineStageMap());
@@ -573,13 +582,13 @@ try {
     const beforeRoad = result.stage?.lanes.get(60);
     const afterRoad = result.stage?.lanes.get(76);
     const afterTrain = result.stage?.lanes.get(79);
-    const lateRoad = result.stage?.lanes.get(138);
-    const lateTrain = result.stage?.lanes.get(140);
-    const bigLakesRoad = result.stage?.lanes.get(212);
-    const bigLakesTrain = result.stage?.lanes.get(235);
-    const bigLakesRiver = result.stage?.lanes.get(222);
-    const beforeFinalBillboardRoad = result.stage?.lanes.get(372);
-    const afterFinalBillboardRoad = result.stage?.lanes.get(376);
+    const lateRoad = result.stage?.lanes.get(141);
+    const lateTrain = result.stage?.lanes.get(138);
+    const bigLakesRoad = result.stage?.lanes.get(152);
+    const bigLakesTrain = result.stage?.lanes.get(160);
+    const bigLakesRiver = result.stage?.lanes.get(219);
+    const beforeFinalBillboardRoad = result.stage?.lanes.get(273);
+    const afterFinalBillboardRoad = result.stage?.lanes.get(277);
     return beforeRoad?.kind === "road"
       && afterRoad?.kind === "road"
       && afterTrain?.kind === "train"
@@ -600,12 +609,12 @@ try {
       && approx(lateRoad.gap, 4.5 * 1.7 * 0.9 * 0.8)
       && approx(lateTrain.speed, 2.2 * 1.2 * 1.5 * 1.1 * 1.2)
       && approx(lateTrain.gap, 9.2 * 2 * 1.2 * 0.9 * 0.8)
-      && approx(bigLakesRoad.speed, 1.55 * 0.8 * 1.3 * 1.15 * 1.1 * 1.2 * 1.2)
-      && approx(bigLakesRoad.gap, 4.5 * 0.66 * 1.7 * 0.9 * 0.8 * 1.2)
+      && approx(bigLakesRoad.speed, 2.35 * 0.8 * 1.3 * 1.1 * 1.2 * 1.2)
+      && approx(bigLakesRoad.gap, 5.8 * 1.7 * 0.9 * 0.8 * 1.2)
       && approx(bigLakesTrain.speed, 2.2 * 1.2 * 1.5 * 1.1 * 1.2)
-      && approx(bigLakesTrain.gap, 6.8 * 2 * 1.2 * 0.9 * 0.8 * 0.9)
+      && approx(bigLakesTrain.gap, 9.2 * 2 * 1.2 * 0.9 * 0.8 * 0.9)
       && approx(bigLakesRiver.speed, 1.4 * 1.2 * 1.2 * 0.7 * 1.2)
-      && approx(bigLakesRiver.gap, 5 * 0.56)
+      && approx(bigLakesRiver.gap, 3.4 * 0.56)
       && approx(beforeFinalBillboardRoad.speed, 1.55 * 0.8 * 1.3 * 1.15 * 1.1 * 1.2 * 1.2)
       && approx(afterFinalBillboardRoad.speed, 2.35 * 0.8 * 1.3 * 1.15 * 1.1 * 1.2 * 1.2 * 1.1)
       && approx(afterFinalBillboardRoad.gap, 5.8 * 0.66 * 1.7 * 0.9 * 0.8 * 1.2 * 1.1);
@@ -970,20 +979,20 @@ try {
     const staged = {
       ...state,
       phase: "running",
-      player: { x: 0, z: 212, maxZ: 212 },
+      player: { x: 0, z: 152, maxZ: 152 },
       stage: {
         ...state.stage,
         mode: "chase",
-        target: { x: 0, z: 212, visible: true },
-        targetSpawnHistory: [{ x: 0, z: 212 }],
+        target: { x: 0, z: 152, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 152 }],
         catchCount: 8,
         introCameraHandoffDone: true,
       },
     };
     const ticked = simulation.tickGame(staged, 0.05, { hazardsEnabled: false });
     return ticked.stage.targetPending !== undefined
-      && ticked.stage.targetPending.z >= 234
-      && ticked.stage.targetPending.z <= 248
+      && ticked.stage.targetPending.z >= 174
+      && ticked.stage.targetPending.z <= 188
       && approx((ticked.stage.targetRevealAt ?? 0) - ticked.time, 0.62 * 1.35 * 1.35)
       && ticked.stage.catchCount === 9;
   });
@@ -1092,17 +1101,17 @@ try {
       && panel.eventType === "TARGET_MISSED"
       && missLines.has(panel.text);
   });
-  check("near-final target respawns at z453 before the final conversation", () => {
+  check("near-final target respawns at z354 before the final conversation", () => {
     const state = simulation.createInitialState(stageMap.baselineStageMap(), 0, 0);
     const staged = {
       ...state,
       phase: "running",
-      player: { x: 0, z: 433, maxZ: 433 },
+      player: { x: 0, z: 334, maxZ: 334 },
       stage: {
         ...state.stage,
         mode: "chase",
-        target: { x: 0, z: 433, visible: true },
-        targetSpawnHistory: [{ x: 0, z: 433 }],
+        target: { x: 0, z: 334, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 334 }],
         catchCount: 22,
         introCameraHandoffDone: true,
       },
@@ -1111,10 +1120,10 @@ try {
     const finalCatch = simulation.tickGame(
       {
         ...ticked,
-        player: { x: ticked.stage.targetPending?.x ?? 0, z: 453, maxZ: 453 },
+        player: { x: ticked.stage.targetPending?.x ?? 0, z: 354, maxZ: 354 },
         stage: {
           ...ticked.stage,
-          target: { x: ticked.stage.targetPending?.x ?? 0, z: 453, visible: true },
+          target: { x: ticked.stage.targetPending?.x ?? 0, z: 354, visible: true },
           targetPending: undefined,
           targetRevealAt: undefined,
           targetEscape: undefined,
@@ -1123,7 +1132,7 @@ try {
       0.05,
       { hazardsEnabled: false },
     );
-    return ticked.stage.targetPending?.z === 453
+    return ticked.stage.targetPending?.z === 354
       && ticked.stage.targetPending.x === 0
       && finalCatch.stage.mode === "finalSequence"
       && finalCatch.stage.finalStartedAt !== undefined;
@@ -1220,7 +1229,7 @@ try {
       && jumped.player.hop === undefined
       && jumped.queuedMove === undefined
       && jumped.stage.target.visible === true
-      && jumped.stage.target.z === 453
+      && jumped.stage.target.z === 354
       && jumped.player.z < jumped.stage.target.z
       && jumped.stage.target.z - jumped.player.z <= 20
       && jumped.stage.lastEvent === "Cheat Ending Jump";

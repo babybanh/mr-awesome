@@ -153,14 +153,12 @@ const PALETTE = {
 
 const BILLBOARD_COPY = [
   ["WELCOME TO", "AWESOME TOWN"],
-  ["NICE TRY", "HERO"],
-  ["FRIENDS", "THIS WAY"],
-  ["WATCH FOR", "GATORS"],
-  ["BIG", "LAKES"],
-  ["BIGGER", "ROADS"],
-  ["SECRET", "SHORTCUT"],
-  ["UP", "THE PEAKS"],
-  ["OUT OF", "ROAD"],
+  ["PANCAKE", "PLAZA"],
+  ["RIVERFRONT", "WAY"],
+  ["GATOR", "CROSSING"],
+  ["BIG LAKES", "DISTRICT"],
+  ["BUSY ROAD", "AVENUE"],
+  ["CITY LIMITS", "AHEAD"],
 ] as const;
 
 const MR_AWESOME_PLAYER_SCALE = 0.52;
