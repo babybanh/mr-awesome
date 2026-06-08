@@ -238,6 +238,7 @@ const REVEAL_CAMERA_ZOOM_PERCENT = 150;
 const CHASE_CAMERA_ZOOM_PERCENT = 118;
 const CHASE_CAMERA_AHEAD_OFFSET_ROWS = 2.15;
 const CHASE_CAMERA_TOP_STOP_Z = 445;
+const CHASE_CAMERA_TOP_STOP_LEAD_ROWS = 17;
 const ESCAPE_POP_SECONDS = 0.62;
 const DECORATIVE_LOG_SPEED_MULTIPLIER = 1.2;
 
@@ -1169,7 +1170,11 @@ function targetCameraFocusX(playerX: number, state: GameState, useStageCamera: b
 function targetCameraFocusZ(playerZ: number, state: GameState, useStageCamera: boolean): number {
   const laneMaxZ = Math.max(...state.lanes.keys());
   const authoredTopStopZ = laneMaxZ - CAMERA_SPEC.topBoundaryLeadRows;
-  const topStopPlayerZ = Math.max(CAMERA_SPEC.bottomAnchorPlayerZ, Math.min(authoredTopStopZ, CHASE_CAMERA_TOP_STOP_Z));
+  const dynamicTopStopZ = laneMaxZ - CHASE_CAMERA_TOP_STOP_LEAD_ROWS;
+  const topStopPlayerZ = Math.max(
+    CAMERA_SPEC.bottomAnchorPlayerZ,
+    Math.min(authoredTopStopZ, CHASE_CAMERA_TOP_STOP_Z, dynamicTopStopZ),
+  );
   if (useStageCamera && state.stage.mode === "introPancakes") return rawCameraFocusZ(CAMERA_SPEC.bottomAnchorPlayerZ);
   if (useStageCamera && state.stage.mode === "summoning" && state.stage.target.visible) {
     return introRevealCameraFocusZ(state, topStopPlayerZ);
