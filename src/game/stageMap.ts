@@ -156,10 +156,10 @@ z=279 R> | vehicle=M speed=M gap=L density=L cover=none color=mixed seed=55 |
 z=278 R< | vehicle=S speed=S gap=L density=L cover=none color=mixed seed=54 |
 z=277 R> | vehicle=M speed=S gap=L density=L cover=none color=mixed seed=55 |
 z=276 G  | #3 . . . . . . p1 . . . . #3 |
-z=275 G  | . . B1 b1 p1 . . . . B2 b2 b2 . |
-z=274 G  | . #3 b1 b1 . #3 . . #3 b2 b2 b2 . |
-z=273 G  | . . b1 b1 . . . . . b2 b2 b2 . |
-z=272 G  | . . . . . p1 . . . p1 . . . |
+z=275 G  | B7 b7 b7 b7 . . . . . . . . . |
+z=274 G  | b7 b7 b7 b7 #3 . . . #3 B5 b5 b5 #3 |
+z=273 G  | b7 b7 b7 b7 . . p1 . . b5 b5 b5 . |
+z=272 G  | b7 b7 b7 b7 #3 . . . #3 b5 b5 b5 #3 |
 z=271 W> | log=M speed=S gap=S |
 z=270 W< | log=M speed=M gap=M |
 z=269 W> | log=L speed=S gap=S |
@@ -228,10 +228,10 @@ z=207 G  | #3 #3 #3 p1 . . . . . . #3 #3 . |
 z=206 R< | vehicle=S speed=M gap=M density=M cover=none color=mixed seed=61 |
 z=205 R> | vehicle=S speed=M gap=M density=M cover=none color=mixed seed=61 |
 z=204 R< | vehicle=S speed=M gap=M density=M cover=none color=mixed seed=61 |
-z=203 D  | . . . B6 b6 . . . B8 b8 . . . |
-z=202 G  | #4 . . b6 b6 . . . b8 b8 . . #4 |
-z=201 D  | . . #4 b6 b6 #4 . #4 b8 b8 #4 . . |
-z=200 G  | . . . p1 . . . . . p1 . . . |
+z=203 D  | #3 . B2 b2 b2 . . . #3 B10 b10 b10 . |
+z=202 G  | . . b2 b2 b2 . . . . b10 b10 b10 . |
+z=201 D  | . . b2 b2 b2 #3 . p1 . b10 b10 b10 . |
+z=200 G  | . #3 . . . . . . . b10 b10 b10 #3 |
 z=199 D  | #4 . . . . . p1 . . . . . #4 |
 z=198 R> | vehicle=S speed=S gap=L density=L cover=none |
 z=197 T> | train=L speed=S gap=L warn=L |
