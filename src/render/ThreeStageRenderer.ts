@@ -241,8 +241,9 @@ const CHASE_CAMERA_TOP_STOP_Z = 445;
 const CHASE_CAMERA_TOP_STOP_LEAD_ROWS = 17;
 const ESCAPE_POP_SECONDS = 0.62;
 const DECORATIVE_LOG_SPEED_MULTIPLIER = 1.2;
-const PANCAKE_IDLE_BOUNCE_INTERVAL_SECONDS = 5;
+const PANCAKE_IDLE_BOUNCE_INTERVAL_SECONDS = 3;
 const PANCAKE_IDLE_BOUNCE_SECONDS = 1.2;
+const TARGET_REMINDER_BOUNCE_SECONDS = 1.2;
 
 const CAMERA_SPEC = {
   smoothingSeconds: 0.14,
@@ -290,6 +291,7 @@ export interface RenderEditSelection {
 
 export interface RenderOptions {
   useStageCamera?: boolean;
+  targetReminderActive?: boolean;
 }
 
 export class ThreeStageRenderer {
@@ -386,6 +388,7 @@ export class ThreeStageRenderer {
   render(state: GameState, deltaSeconds: number, editSelection?: RenderEditSelection, options: RenderOptions = {}): void {
     const player = getPlayerDisplayPosition(state);
     const useStageCamera = options.useStageCamera ?? true;
+    const targetReminderActive = options.targetReminderActive ?? false;
     const nextZoom = useStageCamera ? stageCameraZoomPercent(state) : this.cameraZoomPercent;
     this.applyCameraProjection(nextZoom);
     if (state.runId !== this.lastRunId) {
@@ -407,7 +410,7 @@ export class ThreeStageRenderer {
     this.positionCamera();
     this.prepareStageCaches(state);
     const renderWindow = this.visibleRenderWindow();
-    this.rebuildWorld(state, editSelection, renderWindow);
+    this.rebuildWorld(state, editSelection, renderWindow, targetReminderActive);
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -481,7 +484,7 @@ export class ThreeStageRenderer {
     };
   }
 
-  private rebuildWorld(state: GameState, editSelection: RenderEditSelection | undefined, renderWindow: RenderWindow): void {
+  private rebuildWorld(state: GameState, editSelection: RenderEditSelection | undefined, renderWindow: RenderWindow, targetReminderActive: boolean): void {
     const visibleLanes = this.visibleLanes(renderWindow);
     const staticWorldKey = this.staticLayerKey(state, renderWindow);
     if (staticWorldKey !== this.staticWorldKey) {
@@ -505,7 +508,7 @@ export class ThreeStageRenderer {
         if (lane.kind === "train") this.addAutomaticTrainWarningAnchors(lane, state.time);
         this.addMovingObjects(lane, state);
       }
-      this.addPlayerAndTarget(state, renderWindow);
+      this.addPlayerAndTarget(state, renderWindow, targetReminderActive);
       if (editSelection) this.addEditSelection(editSelection);
     });
   }
@@ -850,7 +853,7 @@ export class ThreeStageRenderer {
     return object.z - 0.42;
   }
 
-  private addPlayerAndTarget(state: GameState, renderWindow: RenderWindow): void {
+  private addPlayerAndTarget(state: GameState, renderWindow: RenderWindow, targetReminderActive: boolean): void {
     const player = getPlayerDisplayPosition(state);
     if (!this.addMrAwesomePlayer(player.x, player.y, player.z)) {
       this.addPrimitiveHero(player.x, 0.08 + player.y, player.z, state.phase === "crashed");
@@ -858,7 +861,7 @@ export class ThreeStageRenderer {
 
     if (state.stage.target.visible && state.stage.target.z >= renderWindow.minZ && state.stage.target.z <= renderWindow.maxZ) {
       const target = state.stage.target;
-      const visual = finalTargetVisual(state);
+      const visual = finalTargetVisual(state, targetReminderActive);
       if (visual) {
         if (!this.addMrNotSoAwesomeTarget(target.x, target.z, visual)) {
           this.addPrimitiveTarget(target.x, target.z, visual);
@@ -1278,8 +1281,8 @@ function defaultEscapeVisual(): EscapeVisual {
   return { yOffset: 0, zOffset: 0, scale: 1, opacity: 1 };
 }
 
-function finalTargetVisual(state: GameState): EscapeVisual | null {
-  if (state.stage.mode !== "finalSequence") return targetNudgeVisual(state);
+function finalTargetVisual(state: GameState, targetReminderActive: boolean): EscapeVisual | null {
+  if (state.stage.mode !== "finalSequence") return targetNudgeVisual(state, targetReminderActive);
   if (state.stage.finalPoofStartedAt !== undefined && state.time >= state.stage.finalPoofStartedAt) {
     return escapeVisual(state.stage.finalPoofStartedAt, state.time, 0.23);
   }
@@ -1289,9 +1292,12 @@ function finalTargetVisual(state: GameState): EscapeVisual | null {
   return { ...defaultEscapeVisual(), zOffset: shake, scale: 1 + (surpriseSeconds < 0.5 ? Math.sin(surpriseSeconds * Math.PI * 4) * 0.035 : 0) };
 }
 
-function targetNudgeVisual(state: GameState): EscapeVisual {
+function targetNudgeVisual(state: GameState, targetReminderActive: boolean): EscapeVisual {
   if (state.stage.mode !== "chase" || !state.stage.target.visible || Math.round(state.player.z) <= state.stage.target.z) {
-    return defaultEscapeVisual();
+    return targetReminderActive ? targetReminderBounceVisual(state) : defaultEscapeVisual();
+  }
+  if (targetReminderActive) {
+    return targetReminderBounceVisual(state);
   }
   const cycle = state.time % 2;
   if (cycle > 0.42) return defaultEscapeVisual();
@@ -1300,6 +1306,19 @@ function targetNudgeVisual(state: GameState): EscapeVisual {
     yOffset: 0.03 * pulse,
     zOffset: Math.sin(cycle * 80) * 0.045 * pulse,
     scale: 1 + 0.055 * pulse,
+    opacity: 1,
+  };
+}
+
+function targetReminderBounceVisual(state: GameState): EscapeVisual {
+  const cycle = state.time % TARGET_REMINDER_BOUNCE_SECONDS;
+  const progress = clamp(cycle / TARGET_REMINDER_BOUNCE_SECONDS, 0, 1);
+  const fade = Math.sin(progress * Math.PI);
+  const bounce = Math.max(0, Math.sin(progress * Math.PI * 2)) * fade;
+  return {
+    yOffset: 0.16 * bounce,
+    zOffset: 0,
+    scale: 1 + 0.045 * bounce,
     opacity: 1,
   };
 }
@@ -1319,7 +1338,7 @@ function pancakeIdleBounceVisual(x: number, z: number, state: GameState): Escape
     || firstPancakeAt === undefined
     || state.stage.target.visible
     || state.stage.summonStartedAt !== undefined
-    || !hasRemainingIntroPancakes(state)
+    || z > state.stage.summonMarker.z
   ) {
     return defaultEscapeVisual();
   }
@@ -1337,17 +1356,6 @@ function pancakeIdleBounceVisual(x: number, z: number, state: GameState): Escape
     scale: 1 + 0.045 * bounce,
     opacity: 1,
   };
-}
-
-function hasRemainingIntroPancakes(state: GameState): boolean {
-  for (const lane of state.lanes.values()) {
-    if (lane.z > state.stage.summonMarker.z) continue;
-    for (const x of lane.collectibles) {
-      const key = pancakeKey(x, lane.z);
-      if (!state.collectedPancakes.has(key) && !state.stage.stolenPancakes.has(key)) return true;
-    }
-  }
-  return false;
 }
 
 function targetTravelVisual(state: GameState): TargetTravelVisual | null {

@@ -192,6 +192,7 @@ const avatarFramingByCharacter = new Map<AvatarCharacterId, AvatarFraming>(
 let previousTime = performance.now();
 let previousDialogueState: GameState | undefined;
 let lastDialogueKey = "";
+let activeDialogueEventType: DialoguePanel["eventType"] | undefined;
 let musicEnabled = readStoredMusicEnabled();
 type BootPhase = "loading" | "assets" | "dialogue";
 let bootPhase: BootPhase = "loading";
@@ -412,10 +413,14 @@ function frame(now: number): void {
     resetOpeningTutorial();
     previousDialogueState = undefined;
     lastDialogueKey = "";
+    activeDialogueEventType = undefined;
   }
   if (!creditsOpen) sfx.sync(previousState, state, { cheatMode });
   music.sync(state, { cheatMode });
-  renderer.render(state, creditsOpen ? 0 : deltaSeconds, editSelection, { useStageCamera: !editMode });
+  renderer.render(state, creditsOpen ? 0 : deltaSeconds, editSelection, {
+    useStageCamera: !editMode,
+    targetReminderActive: isFirstStageTargetReminderActive(),
+  });
   updateUi();
   requestAnimationFrame(frame);
 }
@@ -586,6 +591,7 @@ function bindButtons(): void {
     clearEditSelection();
     previousDialogueState = undefined;
     lastDialogueKey = "";
+    activeDialogueEventType = undefined;
     syncMusicNow();
     updateUi();
   });
@@ -957,6 +963,14 @@ function syncMusicNow(): void {
   music.sync(state, { cheatMode });
 }
 
+function isFirstStageTargetReminderActive(): boolean {
+  return activeDialogueEventType === "TARGET_MISSED"
+    && state.stage.mode === "chase"
+    && state.stage.catchCount === 0
+    && !state.stage.introCameraHandoffDone
+    && state.stage.target.visible;
+}
+
 function readStoredMusicEnabled(): boolean {
   return window.localStorage.getItem(MUSIC_ENABLED_STORAGE_KEY) !== "false";
 }
@@ -1280,6 +1294,7 @@ function updateUi(): void {
   if (!openingTutorialSuccessVisible && openingTutorialDismissed && nextDialogue?.eventType === "OPENING_TUTORIAL") nextDialogue = undefined;
   previousDialogueState = state;
   if (!nextDialogue) {
+    activeDialogueEventType = undefined;
     elements.dialogueStrip.classList.add("is-dialogue-hidden");
     elements.dialogueStrip.setAttribute("aria-hidden", "true");
     elements.speaker.textContent = "";
@@ -1289,6 +1304,7 @@ function updateUi(): void {
     return;
   }
   if (!applyDialogueSpeakerVisual(nextDialogue.speaker)) {
+    activeDialogueEventType = undefined;
     if (!lastDialogueKey) {
       elements.dialogueStrip.classList.add("is-dialogue-hidden");
       elements.dialogueStrip.setAttribute("aria-hidden", "true");
@@ -1297,6 +1313,7 @@ function updateUi(): void {
   }
   elements.dialogueStrip.classList.remove("is-dialogue-hidden");
   elements.dialogueStrip.removeAttribute("aria-hidden");
+  activeDialogueEventType = nextDialogue.eventType;
   elements.speaker.textContent = nextDialogue.speakerLabel;
   elements.message.dataset.tone = nextDialogue.tone;
   const nextDialogueKey = `${nextDialogue.speaker}:${nextDialogue.text}`;
@@ -1384,12 +1401,14 @@ function handleOpeningTutorialStart(): boolean {
       openingTutorialSuccessVisible = true;
       previousDialogueState = undefined;
       lastDialogueKey = "";
+      activeDialogueEventType = undefined;
       updateUi();
       return;
     }
     openingTutorialSuccessSwapping = false;
     openingTutorialSuccessVisible = true;
     previousDialogueState = undefined;
+    activeDialogueEventType = undefined;
     updateUi();
   }, 900);
   updateUi();
@@ -1405,12 +1424,14 @@ function handleOpeningTutorialStart(): boolean {
     }
     previousDialogueState = undefined;
     lastDialogueKey = "";
+    activeDialogueEventType = undefined;
     updateUi();
   }, 2700);
   return true;
 }
 
 function resetOpeningTutorial(): void {
+  activeDialogueEventType = undefined;
   openingTutorialDismissed = false;
   openingTutorialAnimating = false;
   openingTutorialSuccessVisible = false;
@@ -1451,6 +1472,7 @@ function startBootReadiness(): void {
       bootReady = true;
       previousDialogueState = undefined;
       lastDialogueKey = "";
+      activeDialogueEventType = undefined;
       updateUi();
     });
   };

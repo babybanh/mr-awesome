@@ -193,7 +193,7 @@ export class MusicManager {
     this.routeStartedRunId = undefined;
     this.villainEndedAt = Number.POSITIVE_INFINITY;
     this.routeEndedAt = Number.POSITIVE_INFINITY;
-    this.pauseAllNow();
+    this.stopAndRewindAllNow();
   }
 
   private pauseAllNow(): void {
@@ -202,6 +202,17 @@ export class MusicManager {
       if (track.audio.volume !== 0) track.audio.volume = 0;
       if (!track.audio.paused) track.audio.pause();
       track.playing = false;
+    }
+  }
+
+  private stopAndRewindAllNow(): void {
+    this.pauseAllNow();
+    for (const track of Object.values(this.tracks)) {
+      try {
+        track.audio.currentTime = 0;
+      } catch {
+        // Some browsers can briefly reject seeking while media metadata is still settling.
+      }
     }
   }
 
@@ -300,7 +311,7 @@ export class MusicManager {
     const track = this.tracks[id];
     try {
       await track.audio.play();
-      track.playing = true;
+      track.playing = !track.audio.paused && track.audio.volume > 0;
     } catch {
       track.playing = false;
       if (id === "villainReveal") this.villainEndedAt = this.lastState?.time ?? 0;
