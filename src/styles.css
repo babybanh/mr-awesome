@@ -860,9 +860,10 @@ h1 {
 }
 
 .bottom-info {
-  grid-column: 1;
+  grid-column: 3;
+  grid-row: 1;
   position: static;
-  justify-self: start;
+  justify-self: end;
   min-width: 0;
   display: grid;
   gap: clamp(8px, calc(var(--board-size) * 0.017), 12px);
@@ -912,7 +913,7 @@ h1 {
 }
 
 .credits-trigger {
-  justify-self: start;
+  justify-self: end;
   width: clamp(104px, calc(var(--board-size) * 0.17), 128px);
   min-height: clamp(38px, calc(var(--board-size) * 0.064), 46px);
   padding: 0 14px;
@@ -935,11 +936,12 @@ h1 {
 }
 
 .utility-controls {
-  grid-column: 3;
-  justify-self: end;
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
   display: flex;
   align-items: flex-start;
-  gap: clamp(6px, calc(var(--board-size) * 0.014), 9px);
+  gap: clamp(10px, calc(var(--board-size) * 0.021), 15px);
 }
 
 .repeat-trigger,
@@ -962,10 +964,6 @@ h1 {
 .repeat-trigger {
   font-size: clamp(19px, calc(var(--board-size) * 0.036), 23px);
   font-weight: 950;
-}
-
-.repeat-trigger {
-  display: none !important;
 }
 
 .sound-icon {
@@ -1016,6 +1014,7 @@ h1 {
   --control-size: var(--dpad-size);
   --control-gap: var(--dpad-gap);
   grid-column: 2;
+  grid-row: 1;
   position: static;
   display: grid;
   grid-template-columns: repeat(3, var(--control-size));

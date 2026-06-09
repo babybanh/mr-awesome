@@ -745,25 +745,31 @@ try {
       && moved.stage.mode === "introPancakes"
       && approx(moved.player.hop.duration, 0.19 / 1.1);
   });
-  check("pre-first-catch chase keeps river and log lanes locked", () => {
-    const state = simulation.createInitialState(introBlockedRiverTown, 0, 0);
+  check("pre-first-catch chase river lock pulls hero back to start", () => {
+    const state = simulation.createInitialState(riverIntroTown, 0, 0);
     const staged = {
       ...state,
       phase: "running",
+      player: { x: 0, z: 4, maxZ: 4 },
       stage: {
         ...state.stage,
         mode: "chase",
-        target: { x: 0, z: 0, visible: true },
-        targetSpawnHistory: [{ x: 0, z: 0 }],
+        target: { x: 0, z: 8, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 8 }],
         catchCount: 0,
         introCameraHandoffDone: false,
       },
     };
     const moved = simulation.applyAction(staged, "forward");
-    return moved.player.hop?.toZ === 0
-      && moved.player.z === 0
+    const panel = new dialogue.DialogueDirector().update(staged, moved, { editMode: false, cheatMode: false });
+    return moved.player.hop?.kind === "targetPullback"
+      && moved.player.hop?.toZ === 0
+      && moved.player.z === 4
       && moved.stage.mode === "chase"
-      && moved.stage.catchCount === 0;
+      && moved.stage.catchCount === 0
+      && moved.stage.target.visible === true
+      && moved.stage.lastEvent === "Target missed"
+      && panel?.eventType === "TARGET_MISSED";
   });
   check("hero hop speeds up after the second difficulty ramp", () => {
     const state = simulation.createInitialState(stageMap.baselineStageMap(), 0, 0);
@@ -1319,6 +1325,58 @@ try {
     return panel.speaker === "B"
       && panel.eventType === "VILLAIN_REVEAL"
       && panel.text === "Thanks for the pancakes. I trapped your friends too!";
+  });
+  check("first-stage target reminder waits three seconds after reveal", () => {
+    const state = simulation.createInitialState(riverIntroTown, 0, 0);
+    const baseStage = {
+      ...state.stage,
+      mode: "chase",
+      target: { x: 0, z: 8, visible: true },
+      targetSpawnHistory: [{ x: 0, z: 8 }],
+      summonStartedAt: 0,
+      catchCount: 0,
+      introCameraHandoffDone: false,
+    };
+    const early = {
+      ...state,
+      phase: "running",
+      time: dialogue.REVEAL_TOTAL_SECONDS + 2.95,
+      player: { x: 0, z: 4, maxZ: 4 },
+      stage: baseStage,
+    };
+    const ready = { ...early, time: dialogue.REVEAL_TOTAL_SECONDS + 3.05 };
+    const earlyPanel = new dialogue.DialogueDirector().update(undefined, early, { editMode: false, cheatMode: false });
+    const readyPanel = new dialogue.DialogueDirector().update(undefined, ready, { editMode: false, cheatMode: false });
+    return earlyPanel === undefined
+      && readyPanel?.speaker === "B"
+      && readyPanel.eventType === "TARGET_MISSED";
+  });
+  check("first-stage river pullback keeps active target reminder", () => {
+    const state = simulation.createInitialState(riverIntroTown, 0, 0);
+    const staged = {
+      ...state,
+      phase: "running",
+      time: dialogue.REVEAL_TOTAL_SECONDS + 3.05,
+      player: { x: 0, z: 4, maxZ: 4 },
+      stage: {
+        ...state.stage,
+        mode: "chase",
+        target: { x: 0, z: 8, visible: true },
+        targetSpawnHistory: [{ x: 0, z: 8 }],
+        summonStartedAt: 0,
+        catchCount: 0,
+        introCameraHandoffDone: false,
+      },
+    };
+    const director = new dialogue.DialogueDirector();
+    const reminder = director.update(undefined, staged, { editMode: false, cheatMode: false });
+    const pulled = simulation.applyAction(staged, "forward");
+    const afterPullback = director.update(staged, pulled, { editMode: false, cheatMode: false });
+    return reminder?.eventType === "TARGET_MISSED"
+      && pulled.player.hop?.kind === "targetPullback"
+      && pulled.player.hop.toZ === 0
+      && afterPullback?.eventType === "TARGET_MISSED"
+      && afterPullback.text === reminder.text;
   });
   check("first catch handoff dialogue happens once", () => {
     const state = simulation.createInitialState(introFivePancakeTown, 0, 0);

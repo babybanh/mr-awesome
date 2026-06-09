@@ -404,6 +404,7 @@ function startMove(state: GameState, move: MoveAction, options: ActionOptions = 
   let lane = state.lanes.get(targetZ);
   if (!lane) return state;
   if (!options.cheatMode && lane.kind === "river" && isFirstStageRiverLocked(state)) {
+    if (state.stage.mode === "chase") return startTargetMissPullbackToStart(state);
     targetX = Math.round(state.player.x);
     targetZ = Math.round(state.player.z);
     lane = state.lanes.get(targetZ);
@@ -911,6 +912,16 @@ function updateStageProgress(state: GameState): GameState {
 
 function startTargetMissPullback(state: GameState): GameState {
   const pullback = targetMissPullbackPoint(state);
+  return startTargetMissPullbackTo(state, pullback);
+}
+
+function startTargetMissPullbackToStart(state: GameState): GameState {
+  const start = firstSafeGroundPoint(state, state.stage.playerStart.z, [state.stage.playerStart.x])
+    ?? stageStart(state);
+  return startTargetMissPullbackTo(state, start);
+}
+
+function startTargetMissPullbackTo(state: GameState, pullback: GridPoint | undefined): GameState {
   if (!pullback) return state;
   return {
     ...state,

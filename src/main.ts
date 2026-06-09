@@ -581,6 +581,8 @@ function bindButtons(): void {
     unlockMusic();
     state = createInitialState(state.stageMap, state.runId + 1, Math.max(state.bestScore, state.score));
     resetOpeningTutorial();
+    openingTutorialDismissed = true;
+    observedRunId = state.runId;
     clearEditSelection();
     previousDialogueState = undefined;
     lastDialogueKey = "";

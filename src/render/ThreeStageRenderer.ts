@@ -241,6 +241,8 @@ const CHASE_CAMERA_TOP_STOP_Z = 445;
 const CHASE_CAMERA_TOP_STOP_LEAD_ROWS = 17;
 const ESCAPE_POP_SECONDS = 0.62;
 const DECORATIVE_LOG_SPEED_MULTIPLIER = 1.2;
+const PANCAKE_IDLE_BOUNCE_INTERVAL_SECONDS = 5;
+const PANCAKE_IDLE_BOUNCE_SECONDS = 1.2;
 
 const CAMERA_SPEC = {
   smoothingSeconds: 0.14,
@@ -587,7 +589,7 @@ export class ThreeStageRenderer {
       if (object.z !== lane.z) continue;
       if (object.kind === "warning") this.addWarningSign(object.x, this.groundEdgePropZ(object, state), object.assetId, this.isWarningPropActive(object, state));
       if (object.kind === "pancake" && !state.collectedPancakes.has(pancakeKey(object.x, object.z))) {
-        const escape = pancakeEscapeVisual(object.x, object.z, state);
+        const escape = pancakeVisual(object.x, object.z, state);
         if (escape !== null) this.addPancake(object.x, object.z, object.assetId, escape);
       }
     }
@@ -1302,12 +1304,50 @@ function targetNudgeVisual(state: GameState): EscapeVisual {
   };
 }
 
-function pancakeEscapeVisual(x: number, z: number, state: GameState): EscapeVisual | null {
+function pancakeVisual(x: number, z: number, state: GameState): EscapeVisual | null {
   const key = pancakeKey(x, z);
-  if (!state.stage.stolenPancakes.has(key)) return defaultEscapeVisual();
+  if (!state.stage.stolenPancakes.has(key)) return pancakeIdleBounceVisual(x, z, state);
   const startedAt = state.stage.stolenPancakesStartedAt;
   if (startedAt === undefined || state.time <= startedAt) return defaultEscapeVisual();
   return escapeVisual(startedAt, state.time, x * 0.017 + z * 0.011);
+}
+
+function pancakeIdleBounceVisual(x: number, z: number, state: GameState): EscapeVisual {
+  const firstPancakeAt = state.stage.firstPancakeAt;
+  if (
+    state.stage.mode !== "introPancakes"
+    || firstPancakeAt === undefined
+    || state.stage.target.visible
+    || state.stage.summonStartedAt !== undefined
+    || !hasRemainingIntroPancakes(state)
+  ) {
+    return defaultEscapeVisual();
+  }
+  const elapsed = state.time - firstPancakeAt;
+  if (elapsed < PANCAKE_IDLE_BOUNCE_INTERVAL_SECONDS) return defaultEscapeVisual();
+  const cycle = (elapsed - PANCAKE_IDLE_BOUNCE_INTERVAL_SECONDS) % PANCAKE_IDLE_BOUNCE_INTERVAL_SECONDS;
+  if (cycle > PANCAKE_IDLE_BOUNCE_SECONDS) return defaultEscapeVisual();
+  const stagger = positiveModulo(x + z, 3) * 0.08;
+  const progress = clamp((cycle - stagger) / PANCAKE_IDLE_BOUNCE_SECONDS, 0, 1);
+  const fade = Math.sin(progress * Math.PI);
+  const bounce = Math.max(0, Math.sin(progress * Math.PI * 2)) * fade;
+  return {
+    yOffset: 0.18 * bounce,
+    zOffset: 0,
+    scale: 1 + 0.045 * bounce,
+    opacity: 1,
+  };
+}
+
+function hasRemainingIntroPancakes(state: GameState): boolean {
+  for (const lane of state.lanes.values()) {
+    if (lane.z > state.stage.summonMarker.z) continue;
+    for (const x of lane.collectibles) {
+      const key = pancakeKey(x, lane.z);
+      if (!state.collectedPancakes.has(key) && !state.stage.stolenPancakes.has(key)) return true;
+    }
+  }
+  return false;
 }
 
 function targetTravelVisual(state: GameState): TargetTravelVisual | null {

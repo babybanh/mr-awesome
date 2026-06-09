@@ -128,6 +128,9 @@ const TARGET_MISSED_LINES = [
   "Catch me to keep going!",
 ] as const;
 
+const FIRST_TARGET_REMINDER_DELAY_SECONDS = 3;
+const FIRST_TARGET_REMINDER_REPEAT_SECONDS = 3;
+
 const A_CATCH_LINES = [
   "Got you!",
   "Not so fast!",
@@ -584,6 +587,7 @@ export class DialogueDirector {
   private introPancakeReminderCount: number | undefined;
   private nextIntroPancakeReminderAt = Number.POSITIVE_INFINITY;
   private nextIntroPancakeReminderIndex = 0;
+  private nextFirstTargetReminderAt = Number.POSITIVE_INFINITY;
 
   update(previous: GameState | undefined, state: GameState, options: DialogueOptions): DialoguePanel | undefined {
     if (state.runId !== this.lastRunId) this.reset(state.runId);
@@ -652,6 +656,7 @@ export class DialogueDirector {
     this.introPancakeReminderCount = undefined;
     this.nextIntroPancakeReminderAt = Number.POSITIVE_INFINITY;
     this.nextIntroPancakeReminderIndex = 0;
+    this.nextFirstTargetReminderAt = Number.POSITIVE_INFINITY;
   }
 
   private eventLine(previous: GameState | undefined, state: GameState): DialogueLine | undefined {
@@ -677,6 +682,7 @@ export class DialogueDirector {
     const targetMissed = state.stage.lastEvent === "Target missed" && previous.stage.lastEvent !== "Target missed";
     if (targetMissed) {
       this.suppressAmbientUntil = state.time + 2.4;
+      if (this.active?.eventType === "TARGET_MISSED" && this.active.expiresAt > state.time) return undefined;
       return this.pickLine("B", TARGET_MISSED_LINES, 108, "TARGET_MISSED", state, {
         tone: "instruction",
         duration: durationForText(TARGET_MISSED_LINES[0] ?? "", "tutorial"),
@@ -727,6 +733,9 @@ export class DialogueDirector {
     if (state.stage.mode === "introPancakes") {
       return this.introPancakeReminderLine(state);
     }
+
+    const firstTargetReminder = this.firstTargetReminderLine(state);
+    if (firstTargetReminder) return firstTargetReminder;
 
     if (state.time < this.nextAmbientAttemptAt) return undefined;
     this.nextAmbientAttemptAt = state.time + 7 + seededUnit(state) * 5;
@@ -838,6 +847,26 @@ export class DialogueDirector {
     this.nextIntroPancakeReminderIndex = (this.nextIntroPancakeReminderIndex + 1) % PANCAKE_REMINDER_LINES.length;
     this.nextIntroPancakeReminderAt = state.time + PANCAKE_REMINDER_INTERVAL_SECONDS;
     return line("A", text, 35, "PANCAKE_REMINDER", durationForText(text, "normal"), "instruction");
+  }
+
+  private firstTargetReminderLine(state: GameState): DialogueLine | undefined {
+    if (!isFirstTargetReminderState(state)) {
+      this.nextFirstTargetReminderAt = Number.POSITIVE_INFINITY;
+      return undefined;
+    }
+    const readyAt = firstTargetReminderReadyAt(state);
+    if (!Number.isFinite(this.nextFirstTargetReminderAt)) this.nextFirstTargetReminderAt = readyAt;
+    else this.nextFirstTargetReminderAt = Math.max(this.nextFirstTargetReminderAt, readyAt);
+    if (state.time < this.nextFirstTargetReminderAt) return undefined;
+
+    const lineToShow = this.pickLine("B", TARGET_MISSED_LINES, 108, "TARGET_MISSED", state, {
+      tone: "instruction",
+      duration: durationForText(TARGET_MISSED_LINES[0] ?? "", "tutorial"),
+    });
+    const duration = lineToShow?.duration ?? durationForText(TARGET_MISSED_LINES[0] ?? "", "tutorial");
+    this.nextFirstTargetReminderAt = state.time + duration + FIRST_TARGET_REMINDER_REPEAT_SECONDS;
+    this.suppressAmbientUntil = state.time + duration;
+    return lineToShow;
   }
 
   private catchLine(state: GameState): DialogueLine | undefined {
@@ -985,6 +1014,19 @@ function isFirstCatchHandoff(state: GameState): boolean {
     && !state.stage.introCameraHandoffDone
     && state.stage.introCameraHandoffStartedAt !== undefined
     && state.stage.introCameraHandoffReleaseAt !== undefined;
+}
+
+function isFirstTargetReminderState(state: GameState): boolean {
+  return state.phase === "running"
+    && state.stage.mode === "chase"
+    && state.stage.catchCount === 0
+    && !state.stage.introCameraHandoffDone
+    && state.stage.target.visible;
+}
+
+function firstTargetReminderReadyAt(state: GameState): number {
+  if (state.stage.summonStartedAt === undefined) return Number.NEGATIVE_INFINITY;
+  return state.stage.summonStartedAt + REVEAL_TOTAL_SECONDS + FIRST_TARGET_REMINDER_DELAY_SECONDS;
 }
 
 function openingTutorialPanel(state: GameState): DialoguePanel | undefined {
