@@ -240,6 +240,10 @@ window.addEventListener("beforeunload", () => {
 function frame(now: number): void {
   const deltaSeconds = Math.min(0.05, (now - previousTime) / 1000);
   previousTime = now;
+  if (document.hidden) {
+    requestAnimationFrame(frame);
+    return;
+  }
   const previousState = state;
   state = tickGame(state, deltaSeconds, { hazardsEnabled: !editMode && !cheatMode, stageCompletionEnabled: !editMode, cheatMode });
   if (state.runId !== observedRunId) {
