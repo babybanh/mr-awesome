@@ -400,6 +400,10 @@ function ensureEditorDom(): void {
 function frame(now: number): void {
   const deltaSeconds = Math.min(0.05, (now - previousTime) / 1000);
   previousTime = now;
+  if (document.hidden) {
+    requestAnimationFrame(frame);
+    return;
+  }
   const creditsOpen = !elements.creditsModal.hidden;
   const previousState = state;
   if (!creditsOpen) {

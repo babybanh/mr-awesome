@@ -9,6 +9,8 @@ interface MusicSyncOptions {
 interface TrackState {
   audio: HTMLAudioElement;
   playing: boolean;
+  pending: boolean;
+  requestId: number;
 }
 
 const TRACKS: Record<MusicTrackId, { src: string; loop: boolean; volume: number }> = {
@@ -82,7 +84,7 @@ export class MusicManager {
   sync(state: GameState, options: MusicSyncOptions): void {
     this.lastState = state;
     this.lastOptions = options;
-    if (!this.unlocked || !this.enabled) return;
+    if (document.hidden || !this.unlocked || !this.enabled) return;
 
     if (state.runId !== this.lastRunId) this.resetRun(state.runId);
     if (state.phase === "paused") {
@@ -178,7 +180,7 @@ export class MusicManager {
       if (id === "routeTheme") this.routeEndedAt = this.lastState?.time ?? 0;
       this.tracks[id].playing = false;
     });
-    return { audio, playing: false };
+    return { audio, playing: false, pending: false, requestId: 0 };
   }
 
   private resetRun(runId: number): void {
@@ -199,6 +201,8 @@ export class MusicManager {
   private pauseAllNow(): void {
     this.clearIntroStartTimer();
     for (const track of Object.values(this.tracks)) {
+      track.requestId += 1;
+      track.pending = false;
       if (track.audio.volume !== 0) track.audio.volume = 0;
       if (!track.audio.paused) track.audio.pause();
       track.playing = false;
@@ -218,7 +222,7 @@ export class MusicManager {
 
   private handleVisibility = (): void => {
     if (document.hidden) {
-      this.resumeAfterVisible = Object.values(this.tracks).some((track) => track.playing && !track.audio.paused);
+      this.resumeAfterVisible ||= Object.values(this.tracks).some((track) => track.playing && !track.audio.paused);
       this.pauseAllNow();
       return;
     }
@@ -239,7 +243,7 @@ export class MusicManager {
       this.introStartTimer = undefined;
       this.introStartScheduledRunId = undefined;
       const state = this.lastState;
-      if (!this.unlocked || !this.enabled || !state) return;
+      if (document.hidden || !this.unlocked || !this.enabled || !state) return;
       if (state.runId !== runId || state.stage.mode !== "introPancakes" || state.phase !== "running") return;
       this.playLoop("heroIntro");
     }, INTRO_THEME_START_DELAY_MS);
@@ -263,18 +267,24 @@ export class MusicManager {
   }
 
   private playRouteTheme(runId: number): void {
-    if (this.routeStartedRunId === runId && this.tracks.routeTheme.playing) return;
-    const isPausedMidTrack = this.routeStartedRunId === runId
-      && this.routeEndedAt === Number.POSITIVE_INFINITY
-      && !this.tracks.routeTheme.playing;
-    if (!isPausedMidTrack && this.routeStartedRunId === runId && this.routeEndedAt + ROUTE_THEME_LOOP_GAP_SECONDS > (this.lastState?.time ?? 0)) return;
+    if (this.routeStartedRunId === runId) {
+      if (this.routeEndedAt === Number.POSITIVE_INFINITY) {
+        this.tracks.routeTheme.audio.volume = TRACKS.routeTheme.volume;
+        void this.safePlay("routeTheme");
+        return;
+      }
+      if (this.routeEndedAt + ROUTE_THEME_LOOP_GAP_SECONDS > (this.lastState?.time ?? 0)) return;
+    }
     this.routeStartedRunId = runId;
     this.routeEndedAt = Number.POSITIVE_INFINITY;
     this.playLoop("routeTheme");
   }
 
   private playVillainReveal(runId: number): void {
-    if (this.villainStartedRunId === runId) return;
+    if (this.villainStartedRunId === runId) {
+      if (this.villainEndedAt === Number.POSITIVE_INFINITY) this.resumeOnce("villainReveal");
+      return;
+    }
     this.villainStartedRunId = runId;
     this.playOnce("villainReveal");
   }
@@ -302,6 +312,8 @@ export class MusicManager {
 
   private stopTrack(id: MusicTrackId): void {
     const track = this.tracks[id];
+    track.requestId += 1;
+    track.pending = false;
     if (!track.audio.paused) track.audio.pause();
     if (track.audio.volume !== 0) track.audio.volume = 0;
     track.playing = false;
@@ -309,12 +321,19 @@ export class MusicManager {
 
   private async safePlay(id: MusicTrackId): Promise<void> {
     const track = this.tracks[id];
+    if (track.pending || (track.playing && !track.audio.paused)) return;
+    const requestId = ++track.requestId;
+    track.pending = true;
     try {
       await track.audio.play();
-      track.playing = !track.audio.paused && track.audio.volume > 0;
+      if (requestId === track.requestId) track.playing = !track.audio.paused && track.audio.volume > 0;
     } catch {
+      if (requestId !== track.requestId) return;
       track.playing = false;
+      this.unlocked = false;
       if (id === "villainReveal") this.villainEndedAt = this.lastState?.time ?? 0;
+    } finally {
+      if (requestId === track.requestId) track.pending = false;
     }
   }
 }
