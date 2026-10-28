@@ -17,9 +17,9 @@ const FILE_SFX_PATHS: Record<FileSfxKey, string> = {
 
 const FILE_SFX_VOLUME: Record<FileSfxKey, number> = {
   reveal: 0.36,
-  escape: 0.36,
-  crash: 0.36,
-  pickup: 0.32,
+  escape: 0.24,
+  crash: 0.12,
+  pickup: 0.48,
 };
 const PICKUP_MIN_INTERVAL_SECONDS = 0.11;
 
@@ -36,6 +36,8 @@ export class SfxManager {
   private lastPickupSoundAt = -Infinity;
   private lastDialogueBlipAt = -Infinity;
   private enabled = true;
+  private fileSfxPrimeTimer: number | undefined;
+  private fileSfxPrimed = false;
 
   unlock(): void {
     if (!this.context) {
@@ -45,7 +47,7 @@ export class SfxManager {
     }
     this.unlocked = true;
     if (this.context.state === "suspended") void this.context.resume();
-    this.primeFileSfx();
+    this.scheduleFileSfxPrime();
   }
 
   setEnabled(enabled: boolean): void {
@@ -66,8 +68,7 @@ export class SfxManager {
     if (options.cheatMode) return;
 
     if (
-      shouldPlayDesktopPickupSfx()
-      && next.collectedPancakes.size > previous.collectedPancakes.size
+      next.collectedPancakes.size > previous.collectedPancakes.size
       && next.time - this.lastPickupSoundAt >= PICKUP_MIN_INTERVAL_SECONDS
     ) {
       this.lastPickupSoundAt = next.time;
@@ -105,12 +106,17 @@ export class SfxManager {
 
   dispose(): void {
     void this.context?.close();
+    if (this.fileSfxPrimeTimer !== undefined) {
+      window.clearTimeout(this.fileSfxPrimeTimer);
+      this.fileSfxPrimeTimer = undefined;
+    }
     for (const player of this.filePlayers.values()) {
       player.pause();
       player.src = "";
     }
     this.filePlayers.clear();
     this.context = undefined;
+    this.fileSfxPrimed = false;
   }
 
   playDialogueBlip(speaker: DialogueSpeaker, gameTime: number): void {
@@ -118,12 +124,18 @@ export class SfxManager {
     if (gameTime - this.lastDialogueBlipAt < 0.14) return;
     this.lastDialogueBlipAt = gameTime;
     if (speaker === "A") {
-      this.tone(520, 0.055, "triangle", 0.025, 0);
-      this.tone(690, 0.045, "sine", 0.018, 0.035);
+      this.tone(520, 0.055, "triangle", 0.084, 0);
+      this.tone(690, 0.045, "sine", 0.056, 0.035);
       return;
     }
-    this.tone(255, 0.065, "triangle", 0.026, 0);
-    this.tone(178, 0.055, "sine", 0.018, 0.04);
+    this.tone(255, 0.065, "triangle", 0.088, 0);
+    this.tone(178, 0.055, "sine", 0.06, 0.04);
+  }
+
+  playTutorialPickup(): void {
+    if (!this.enabled || !this.unlocked || !this.context) return;
+    if (this.playFileSfx("pickup")) return;
+    this.playPickupTone();
   }
 
   private playRevealSnap(): void {
@@ -142,7 +154,8 @@ export class SfxManager {
   }
 
   private playPickup(): void {
-    this.playFileSfx("pickup");
+    if (this.playFileSfx("pickup")) return;
+    this.playPickupTone();
   }
 
   private playRevealSnapTone(): void {
@@ -152,21 +165,27 @@ export class SfxManager {
   }
 
   private playEscapePopTone(): void {
-    this.tone(218, 0.08, "triangle", 0.04, 0);
-    this.tone(330, 0.1, "sine", 0.038, 0.055);
-    this.noise(0.07, 0.026, 0.02, "bandpass");
+    this.tone(218, 0.08, "triangle", 0.028, 0);
+    this.tone(330, 0.1, "sine", 0.026, 0.055);
+    this.noise(0.07, 0.018, 0.02, "bandpass");
   }
 
   private playCrashThumpTone(): void {
-    this.tone(74, 0.13, "triangle", 0.07, 0);
-    this.tone(46, 0.18, "sine", 0.06, 0.04);
-    this.noise(0.11, 0.048, 0, "lowpass");
+    this.tone(74, 0.13, "triangle", 0.024, 0);
+    this.tone(46, 0.18, "sine", 0.021, 0.04);
+    this.noise(0.11, 0.016, 0, "lowpass");
   }
 
   private playRouteCue(): void {
     this.tone(330, 0.08, "triangle", 0.06, 0);
     this.tone(440, 0.08, "triangle", 0.06, 0.08);
     this.tone(660, 0.12, "triangle", 0.07, 0.16);
+  }
+
+  private playPickupTone(): void {
+    this.tone(520, 0.055, "square", 0.042, 0);
+    this.tone(780, 0.06, "triangle", 0.048, 0.055);
+    this.tone(1040, 0.075, "sine", 0.051, 0.115);
   }
 
   private tone(frequency: number, duration: number, type: OscillatorType, volume: number, delay: number): void {
@@ -206,29 +225,22 @@ export class SfxManager {
     source.start(start);
   }
 
+  private scheduleFileSfxPrime(): void {
+    if (this.fileSfxPrimed || this.fileSfxPrimeTimer !== undefined) return;
+    this.fileSfxPrimeTimer = window.setTimeout(() => {
+      this.fileSfxPrimeTimer = undefined;
+      this.primeFileSfx();
+    }, 700);
+  }
+
   private primeFileSfx(): void {
+    if (this.fileSfxPrimed) return;
+    this.fileSfxPrimed = true;
     for (const key of Object.keys(FILE_SFX_PATHS) as FileSfxKey[]) {
-      if (key === "pickup" && !shouldPlayDesktopPickupSfx()) continue;
       const player = this.getFilePlayer(key);
       if (!player) continue;
-      player.muted = true;
-      player.volume = 0;
-      const playback = player.play();
-      if (playback?.then) {
-        playback
-          .then(() => {
-            player.pause();
-            player.currentTime = 0;
-          })
-          .catch(() => undefined)
-          .finally(() => {
-            player.muted = false;
-            player.volume = FILE_SFX_VOLUME[key];
-          });
-      } else {
-        player.muted = false;
-        player.volume = FILE_SFX_VOLUME[key];
-      }
+      player.muted = false;
+      player.volume = FILE_SFX_VOLUME[key];
     }
   }
 
@@ -261,12 +273,6 @@ export class SfxManager {
     if (key === "reveal") this.playRevealSnapTone();
     else if (key === "escape") this.playEscapePopTone();
     else if (key === "crash") this.playCrashThumpTone();
+    else if (key === "pickup") this.playPickupTone();
   }
-}
-
-function shouldPlayDesktopPickupSfx(): boolean {
-  if (typeof window === "undefined" || !window.matchMedia) return true;
-  const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
-  const noHover = window.matchMedia("(hover: none)").matches;
-  return !coarsePointer && !noHover;
 }

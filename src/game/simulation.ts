@@ -1,5 +1,6 @@
 import { GRID, PLAYER, type GameAction, type GamePhase, type GameState, type GridPoint, type LaneState, type MoveAction, type MovingSpan, type StageDefinition } from "./types";
 import { baselineStageMap, parseStageMap } from "./stageMap";
+import { FINAL_LINE_DURATIONS, FINAL_LINE_GAP_SECONDS } from "./dialogue";
 
 const BEST_SCORE_KEY = "awesome-superhero.best-score";
 const ROAD_COLORS = {
@@ -15,26 +16,39 @@ const INTRO_PANCAKE_TARGET_COUNT = 5;
 const INTRO_TIMER_SECONDS = 5;
 const SUMMON_DURATION_SECONDS = 1.2;
 const BUMP_BACK_SECONDS = 0.82;
+const HAZARD_RECOVERY_SECONDS = 0.42;
 const PANCAKE_STEAL_DELAY_SECONDS = 0.94;
 const TARGET_CATCH_HIDE_SECONDS = 0.62;
 const FIRST_CATCH_CAMERA_HANDOFF_SECONDS = 1.2;
-const REVEAL_LINE_DURATIONS = [4.2, 3.8, 3.4] as const;
+const REVEAL_LINE_DURATIONS = [3.65, 3.3, 3.05] as const;
 const REVEAL_TOTAL_SECONDS = REVEAL_LINE_DURATIONS.reduce((total, duration) => total + duration, 0);
-const FINAL_LINE_DURATIONS = [3.4, 3.1, 3.8, 3.4] as const;
-const FINAL_LINE_GAP_SECONDS = 0.65;
 const FINAL_DIALOGUE_TOTAL_SECONDS = FINAL_LINE_DURATIONS.reduce(
   (total, duration, index) => total + duration + (index < FINAL_LINE_DURATIONS.length - 1 ? FINAL_LINE_GAP_SECONDS : 0),
   0,
 );
-const FINAL_POST_VICTORY_DELAY_SECONDS = 1.2;
-const POST_VICTORY_AUTO_RESET_SECONDS = 30;
+const FINAL_FADE_DELAY_SECONDS = 0.45;
+const FINAL_FADE_SECONDS = 1.0;
 const REVEAL_CONVERSATION_MIN_LINE_SECONDS = 1.15;
 const REVEAL_CONVERSATION_INPUT_ADVANCE_SECONDS = 0.85;
 const HAZARD_RESPAWN_GROUND_ROWS_BACK = 3;
-const TARGET_MIN_ADVANCE_ROWS = 12;
-const TARGET_MAX_ADVANCE_ROWS = 20;
-const TARGET_MAX_GAP_ROWS = 21;
+const TARGET_MIN_ADVANCE_ROWS = 14;
+const TARGET_MAX_ADVANCE_ROWS = 23;
+const TARGET_CATCH_ADVANCE_ROW_BONUS_INTERVAL = 2;
+const TARGET_CATCH_ADVANCE_ROW_BONUS_STEP = 2;
+const TARGET_CATCH_ADVANCE_ROW_BONUS_MAX = 8;
+const TARGET_BILLBOARD_BLIND_SPOT_ROWS = 2;
+const TARGET_AUTO_CATCH_MAX_ROWS_BEHIND = 7;
+const TARGET_MISS_PULLBACK_SECONDS = 0.72;
+const PREFINAL_TARGET_Z = 315;
+const ENDING_CHEAT_PLAYER_ROWS_BEHIND = 20;
 const TARGET_CENTER_PRIORITY = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5] as const;
+const POST_NICE_TRY_BILLBOARD_Z = 70;
+const POST_NICE_TRY_TARGET_ADVANCE_MULTIPLIER = 1.35;
+const POST_BIG_LAKES_BILLBOARD_Z = 150;
+const POST_BIG_LAKES_TARGET_ADVANCE_MULTIPLIER = 1.35;
+const FORWARD_MOVE_SPEED_MULTIPLIER = 1.1;
+const SECOND_DIFFICULTY_RAMP_Z = 127;
+const POST_SECOND_RAMP_HOP_SPEED_MULTIPLIER = 1.1;
 
 const MOVE_DELTAS: Record<MoveAction, { dx: number; dz: number }> = {
   forward: { dx: 0, dz: 1 },
@@ -73,6 +87,7 @@ export function createInitialState(mapText = baselineStageMap(), runId = 0, best
       summonMarker: { ...stage.target },
       stolenPancakes: new Set<string>(),
       targetSpawnHistory: [{ ...stage.target }],
+      autoTargetCatchCount: 0,
       introCameraHandoffDone: false,
       catchCount: 0,
       targetReachCompletesStage: false,
@@ -100,11 +115,6 @@ export function applyAction(state: GameState, action: GameAction, options: Actio
     : state;
   const actionState = options.cheatMode ? enterCheatMode(moveState) : moveState;
   if (actionState.stage.mode === "finalSequence") return actionState;
-  if (actionState.stage.mode === "postVictoryTutorial") {
-    return isMoveAction(action)
-      ? createInitialState(actionState.stageMap, actionState.runId + 1, Math.max(actionState.bestScore, actionState.score))
-      : actionState;
-  }
   if (!options.cheatMode && isMoveAction(action) && isRevealConversationActive(actionState)) return advanceRevealConversation(actionState);
   if (actionState.stage.mode === "summoning") return actionState;
   if (actionState.player.hop) return { ...actionState, queuedMove: { move: action, ttl: PLAYER.inputBufferSeconds } };
@@ -123,7 +133,7 @@ export function tickGame(state: GameState, deltaSeconds: number, options: TickOp
 
   if (next.phase === "paused" || next.phase === "crashed" || next.phase === "complete") return next;
   next = updateStageTimers(next);
-  if (next.runId !== state.runId || next.stage.mode === "finalSequence" || next.stage.mode === "postVictoryTutorial") return next;
+  if (next.runId !== state.runId || next.stage.mode === "finalSequence") return next;
   next = advanceHop(next, delta);
   if (hazardsEnabled) next = detectHazards(next);
   if (stageCompletionEnabled) next = updateStageProgress(next);
@@ -138,6 +148,7 @@ export function tickGame(state: GameState, deltaSeconds: number, options: TickOp
   if (hazardsEnabled) next = carryOnRiver(next, delta);
   if (hazardsEnabled) next = detectHazards(next);
   if (stageCompletionEnabled) next = updateStageProgress(next);
+  next = updateRiverClearProgress(next);
   return next;
 }
 
@@ -226,12 +237,54 @@ export function getPlayerDisplayPosition(state: GameState): { x: number; z: numb
   const hop = state.player.hop;
   if (!hop) return { x: state.player.x, z: state.player.z, y: 0, hopProgress: 1 };
   const progress = Math.min(1, Math.max(0, hop.elapsed / hop.duration));
+  if (hop.kind === "targetPullback") return targetPullbackDisplayPosition(state, progress);
+  const moveProgress = smoothstep(progress);
   return {
-    x: hop.fromX + (hop.toX - hop.fromX) * progress,
-    z: hop.fromZ + (hop.toZ - hop.fromZ) * progress,
+    x: hop.fromX + (hop.toX - hop.fromX) * moveProgress,
+    z: hop.fromZ + (hop.toZ - hop.fromZ) * moveProgress,
     y: Math.sin(Math.PI * progress) * PLAYER.hopArcHeight,
     hopProgress: progress,
   };
+}
+
+function targetPullbackDisplayPosition(state: GameState, progress: number): { x: number; z: number; y: number; hopProgress: number } {
+  const hop = state.player.hop;
+  if (!hop) return { x: state.player.x, z: state.player.z, y: 0, hopProgress: 1 };
+  const moveProgress = targetPullbackProgress(progress);
+  const arc = Math.sin(moveProgress * Math.PI);
+  return {
+    x: hop.fromX + (hop.toX - hop.fromX) * moveProgress + targetPullbackLateralOffset(hop.fromX, hop.fromZ, hop.toX, hop.toZ, state.stage.catchCount, progress),
+    z: hop.fromZ + (hop.toZ - hop.fromZ) * moveProgress,
+    y: 0.42 * arc,
+    hopProgress: progress,
+  };
+}
+
+function targetPullbackProgress(progress: number): number {
+  if (progress < 0.34) return 0.16 * easeInCubic(progress / 0.34);
+  return 0.16 + 0.84 * easeOutCubic((progress - 0.34) / 0.66);
+}
+
+function targetPullbackLateralOffset(fromX: number, fromZ: number, toX: number, toZ: number, catchCount: number, progress: number): number {
+  const seed = positiveModulo(Math.round((fromX + 9) * 29 + (fromZ + 3) * 23 + (toX + 11) * 41 + (toZ + 5) * 17 + catchCount * 31), 6);
+  if (seed === 0) return 0;
+  const direction = seed % 2 === 0 ? 1 : -1;
+  const amplitude = seed <= 2 ? 0.2 : 0.3;
+  if (seed <= 2) return direction * amplitude * Math.sin(progress * Math.PI);
+  return direction * amplitude * Math.sin(progress * Math.PI * 2) * 0.78;
+}
+
+function smoothstep(value: number): number {
+  return value * value * (3 - 2 * value);
+}
+
+function easeInCubic(value: number): number {
+  return value * value * value;
+}
+
+function easeOutCubic(value: number): number {
+  const inverted = 1 - value;
+  return 1 - inverted * inverted * inverted;
 }
 
 export function pancakeKey(x: number, z: number): string {
@@ -285,8 +338,59 @@ export function enterCheatMode(state: GameState): GameState {
       finalStartedAt: undefined,
       finalRescueStartedAt: undefined,
       finalPoofStartedAt: undefined,
-      postVictoryStartedAt: undefined,
+      finalFadeStartedAt: undefined,
       lastEvent: "Cheat Mode",
+    },
+  };
+}
+
+export function advanceTargetToNextSpawn(state: GameState): GameState {
+  const chaseState = state.stage.mode === "chase" ? state : enterCheatMode(state);
+  const nextTarget = findNextTargetSpawn(chaseState);
+  if (!nextTarget) return chaseState;
+  return {
+    ...chaseState,
+    queuedMove: undefined,
+    crashReason: undefined,
+    stage: {
+      ...chaseState.stage,
+      target: { ...nextTarget, visible: true },
+      targetEscape: undefined,
+      targetPending: undefined,
+      targetRevealAt: undefined,
+      targetSpawnHistory: [...chaseState.stage.targetSpawnHistory, nextTarget],
+      lastEvent: "Cheat Target Advanced",
+    },
+  };
+}
+
+export function jumpCheatToEnding(state: GameState): GameState {
+  const chaseState = enterCheatMode(state);
+  const target = firstSafeTargetPoint(chaseState, PREFINAL_TARGET_Z) ?? findLastSafeTargetPoint(chaseState);
+  if (!target) return chaseState;
+  const player = endingCheatPlayerPoint(chaseState, target) ?? stageStart(chaseState);
+  return {
+    ...chaseState,
+    phase: chaseState.phase === "paused" ? "paused" : "running",
+    queuedMove: undefined,
+    crashReason: undefined,
+    player: {
+      x: player.x,
+      z: player.z,
+      maxZ: Math.max(chaseState.player.maxZ, player.z),
+    },
+    stage: {
+      ...chaseState.stage,
+      mode: "chase",
+      target: { ...target, visible: true },
+      targetEscape: undefined,
+      targetPending: undefined,
+      targetRevealAt: undefined,
+      introCameraHandoffDone: true,
+      introCameraHandoffStartedAt: undefined,
+      introCameraHandoffReleaseAt: undefined,
+      targetSpawnHistory: [...chaseState.stage.targetSpawnHistory, target],
+      lastEvent: "Cheat Ending Jump",
     },
   };
 }
@@ -294,14 +398,24 @@ export function enterCheatMode(state: GameState): GameState {
 function startMove(state: GameState, move: MoveAction, options: ActionOptions = {}): GameState {
   if (!options.cheatMode && isIntroCameraHandoffActive(state)) return state;
   const delta = MOVE_DELTAS[move];
-  const targetX = clamp(Math.round(state.player.x) + delta.dx, GRID.minX, GRID.maxX);
+  let targetX = clamp(Math.round(state.player.x) + delta.dx, GRID.minX, GRID.maxX);
   const maxLaneZ = Math.max(...state.lanes.keys());
-  const targetZ = clamp(Math.round(state.player.z) + delta.dz, 0, maxLaneZ);
-  const lane = state.lanes.get(targetZ);
+  let targetZ = clamp(Math.round(state.player.z) + delta.dz, 0, maxLaneZ);
+  let lane = state.lanes.get(targetZ);
   if (!lane) return state;
-  if (state.stage.mode === "introPancakes" && !options.cheatMode && lane.kind === "river") return state;
+  if (!options.cheatMode && lane.kind === "river" && isFirstStageRiverLocked(state)) {
+    if (state.stage.mode === "chase") return startTargetMissPullbackToStart(state);
+    targetX = Math.round(state.player.x);
+    targetZ = Math.round(state.player.z);
+    lane = state.lanes.get(targetZ);
+    if (!lane) return state;
+  }
   if (isGroundLane(lane) && (lane.blockers.includes(targetX) || lane.buildings.includes(targetX))) return state;
-  const duration = options.cheatMode ? PLAYER.hopDuration / 3 : PLAYER.hopDuration;
+  const rampSpeedMultiplier = state.stage.mode === "chase" && Math.round(state.player.z) > SECOND_DIFFICULTY_RAMP_Z
+    ? POST_SECOND_RAMP_HOP_SPEED_MULTIPLIER
+    : 1;
+  const baseDuration = (move === "forward" ? PLAYER.hopDuration / FORWARD_MOVE_SPEED_MULTIPLIER : PLAYER.hopDuration) / rampSpeedMultiplier;
+  const duration = options.cheatMode ? baseDuration / 3 : baseDuration;
   const stage = state.stage.lastEvent?.startsWith("Recovered from")
     ? { ...state.stage, lastEvent: undefined }
     : state.stage;
@@ -318,9 +432,15 @@ function startMove(state: GameState, move: MoveAction, options: ActionOptions = 
         toZ: targetZ,
         elapsed: 0,
         duration,
+        kind: "move",
       },
     },
   };
+}
+
+function isFirstStageRiverLocked(state: GameState): boolean {
+  return state.stage.mode === "introPancakes"
+    || (state.stage.mode === "chase" && state.stage.catchCount === 0 && !state.stage.introCameraHandoffDone);
 }
 
 function advanceHop(state: GameState, delta: number): GameState {
@@ -334,7 +454,9 @@ function advanceHop(state: GameState, delta: number): GameState {
   const maxZ = Math.max(state.player.maxZ, landedZ);
   const score = maxZ;
   const bestScore = Math.max(state.bestScore, score);
-  const collected = collectPancake(state, landedX, landedZ);
+  const collected = hop.kind === "hazardRecovery" || hop.kind === "summonBump" || hop.kind === "targetPullback"
+    ? { pancakes: state.collectedPancakes }
+    : collectPancake(state, landedX, landedZ);
   if (bestScore > state.bestScore) writeBestScore(bestScore);
   const landed: GameState = {
     ...state,
@@ -373,23 +495,21 @@ function updateIntroAfterPancakeCollect(state: GameState, collectedKey: string):
 
 function updateStageTimers(state: GameState): GameState {
   let next = state;
-  if (next.stage.mode === "postVictoryTutorial" && (next.stage.postVictoryStartedAt ?? Number.POSITIVE_INFINITY) + POST_VICTORY_AUTO_RESET_SECONDS <= next.time) {
-    return createInitialState(next.stageMap, next.runId + 1, Math.max(next.bestScore, next.score));
-  }
-  if (next.stage.mode === "finalSequence" && (next.stage.finalStartedAt ?? Number.POSITIVE_INFINITY) + FINAL_DIALOGUE_TOTAL_SECONDS + FINAL_POST_VICTORY_DELAY_SECONDS <= next.time) {
-    const bestScore = Math.max(next.bestScore, next.score);
-    const reset = createInitialState(next.stageMap, next.runId + 1, bestScore);
-    return {
-      ...reset,
-      time: next.time,
-      bestScore,
-      stage: {
-        ...reset.stage,
-        mode: "postVictoryTutorial",
-        postVictoryStartedAt: next.time,
-        lastEvent: "Post Victory Tutorial",
-      },
-    };
+  if (next.stage.mode === "finalSequence" && next.stage.finalStartedAt !== undefined) {
+    const fadeStartedAt = next.stage.finalFadeStartedAt ?? next.stage.finalStartedAt + FINAL_DIALOGUE_TOTAL_SECONDS + FINAL_FADE_DELAY_SECONDS;
+    if (next.time >= fadeStartedAt + FINAL_FADE_SECONDS) {
+      return createInitialState(next.stageMap, next.runId + 1, Math.max(next.bestScore, next.score));
+    }
+    if (next.stage.finalFadeStartedAt === undefined && next.time >= fadeStartedAt) {
+      next = {
+        ...next,
+        stage: {
+          ...next.stage,
+          finalFadeStartedAt: fadeStartedAt,
+          lastEvent: "Final fade",
+        },
+      };
+    }
   }
   if (isIntroCameraHandoffActive(next) && (next.stage.introCameraHandoffReleaseAt ?? Number.POSITIVE_INFINITY) <= next.time) {
     next = {
@@ -456,6 +576,7 @@ function startSummon(state: GameState, firstPancakeAt: number, triggerPancakeKey
         toZ: bumpTarget.z,
         elapsed: 0,
         duration: BUMP_BACK_SECONDS,
+        kind: "summonBump",
       },
     },
     stage: {
@@ -552,16 +673,29 @@ function recoverFromHazard(state: GameState, crashReason: string): GameState {
   const bestScore = Math.max(state.bestScore, state.score);
   writeBestScore(bestScore);
   const respawn = safeRespawnBeforeHazard(state);
-  const recovered: GameState = {
+  const fromX = state.player.x;
+  const fromZ = state.player.z;
+  return {
     ...state,
     phase: "running",
     bestScore,
     crashReason,
     queuedMove: undefined,
-    player: { ...respawn, maxZ: state.player.maxZ },
+    player: {
+      ...respawn,
+      maxZ: state.player.maxZ,
+      hop: {
+        fromX,
+        fromZ,
+        toX: respawn.x,
+        toZ: respawn.z,
+        elapsed: 0,
+        duration: HAZARD_RECOVERY_SECONDS,
+        kind: "hazardRecovery",
+      },
+    },
     stage: { ...state.stage, lastEvent: `Recovered from ${crashReason}` },
   };
-  return rewindTargetIfTooFar(recovered);
 }
 
 function safeRespawnBeforeHazard(state: GameState): GridPoint {
@@ -578,6 +712,19 @@ function safeRespawnBeforeHazard(state: GameState): GridPoint {
     if (safeGroundRows >= HAZARD_RESPAWN_GROUND_ROWS_BACK) return point;
   }
   return firstSafeGroundPoint(state, state.stage.playerStart.z, xPriority(state.stage.playerStart.x)) ?? stageStart(state);
+}
+
+function updateRiverClearProgress(state: GameState): GameState {
+  if (state.stage.firstRiverClearedAt !== undefined) return state;
+  if (state.player.maxZ < 13) return state;
+  return {
+    ...state,
+    stage: {
+      ...state.stage,
+      firstRiverClearedAt: state.time,
+      lastEvent: state.stage.lastEvent === "Target missed" ? state.stage.lastEvent : "First river cleared",
+    },
+  };
 }
 
 function hazardClusterStart(state: GameState, z: number): number {
@@ -598,8 +745,13 @@ function firstSafeGroundPoint(state: GameState, z: number, preferredXs: readonly
 }
 
 function findNextTargetSpawn(state: GameState): GridPoint | undefined {
-  const startZ = Math.round(state.player.z) + TARGET_MIN_ADVANCE_ROWS;
-  const maxPreferredZ = Math.min(Math.max(...state.lanes.keys()), Math.round(state.player.z) + TARGET_MAX_ADVANCE_ROWS);
+  if (shouldUsePrefinalTarget(state)) {
+    const point = firstSafeTargetPoint(state, PREFINAL_TARGET_Z);
+    if (point) return point;
+  }
+  const playerZ = Math.round(state.player.z);
+  const startZ = playerZ + targetMinAdvanceRows(state);
+  const maxPreferredZ = Math.min(Math.max(...state.lanes.keys()), playerZ + targetMaxAdvanceRows(state));
   for (let z = startZ; z <= maxPreferredZ; z += 1) {
     const point = firstSafeTargetPoint(state, z);
     if (point) return point;
@@ -607,9 +759,101 @@ function findNextTargetSpawn(state: GameState): GridPoint | undefined {
   return undefined;
 }
 
+function targetAdvanceMultiplier(state: GameState): number {
+  const playerZ = Math.round(state.player.z);
+  let multiplier = 1;
+  if (playerZ > POST_NICE_TRY_BILLBOARD_Z) multiplier *= POST_NICE_TRY_TARGET_ADVANCE_MULTIPLIER;
+  if (playerZ > POST_BIG_LAKES_BILLBOARD_Z) multiplier *= POST_BIG_LAKES_TARGET_ADVANCE_MULTIPLIER;
+  return multiplier;
+}
+
+function targetMinAdvanceRows(state: GameState): number {
+  return Math.round(TARGET_MIN_ADVANCE_ROWS * targetAdvanceMultiplier(state)) + targetCatchAdvanceRowBonus(state);
+}
+
+function targetMaxAdvanceRows(state: GameState): number {
+  return Math.round(TARGET_MAX_ADVANCE_ROWS * targetAdvanceMultiplier(state)) + targetCatchAdvanceRowBonus(state);
+}
+
+function targetCatchHideSeconds(state: GameState): number {
+  return TARGET_CATCH_HIDE_SECONDS * (targetMaxAdvanceRows(state) / TARGET_MAX_ADVANCE_ROWS);
+}
+
+function targetCatchAdvanceRowBonus(state: GameState): number {
+  return Math.min(
+    TARGET_CATCH_ADVANCE_ROW_BONUS_MAX,
+    Math.floor(state.stage.catchCount / TARGET_CATCH_ADVANCE_ROW_BONUS_INTERVAL) * TARGET_CATCH_ADVANCE_ROW_BONUS_STEP,
+  );
+}
+
+function shouldUsePrefinalTarget(state: GameState): boolean {
+  const playerZ = Math.round(state.player.z);
+  const currentTargetZ = state.stage.target.visible ? state.stage.target.z : state.stage.targetPending?.z;
+  if (currentTargetZ === PREFINAL_TARGET_Z) return false;
+  if (playerZ >= PREFINAL_TARGET_Z) return false;
+  if (playerZ < PREFINAL_TARGET_Z - targetMaxAdvanceRows(state)) return false;
+  return state.lanes.has(PREFINAL_TARGET_Z);
+}
+
 function firstSafeTargetPoint(state: GameState, z: number): GridPoint | undefined {
+  if (isBillboardBlindSpotRow(state, z)) return undefined;
   for (const x of TARGET_CENTER_PRIORITY) {
     if (isSafeGroundPoint(state, { x, z }, { avoidCollectibles: true, avoidPlayer: true })) return { x, z };
+  }
+  return undefined;
+}
+
+function isBillboardBlindSpotRow(state: GameState, z: number): boolean {
+  return state.stageObjects.some((object) => (
+    object.kind === "billboard"
+    && z >= object.z
+    && z <= object.z + TARGET_BILLBOARD_BLIND_SPOT_ROWS
+  ));
+}
+
+function findLastSafeTargetPoint(state: GameState): GridPoint | undefined {
+  for (let z = Math.max(...state.lanes.keys()); z >= 0; z -= 1) {
+    const point = firstSafeTargetPoint(state, z);
+    if (point) return point;
+  }
+  return undefined;
+}
+
+function endingCheatPlayerPoint(state: GameState, target: GridPoint): GridPoint | undefined {
+  const preferredZ = Math.max(0, target.z - ENDING_CHEAT_PLAYER_ROWS_BEHIND);
+  const preferredXs = [...new Set([target.x, Math.round(state.player.x), ...xPriority(target.x)])];
+  for (let radius = 0; radius <= ENDING_CHEAT_PLAYER_ROWS_BEHIND; radius += 1) {
+    const behindZ = preferredZ - radius;
+    if (behindZ >= 0) {
+      const point = firstSafeGroundPointAvoidingCollectibles(state, behindZ, preferredXs)
+        ?? firstSafeGroundPoint(state, behindZ, preferredXs);
+      if (point) return point;
+    }
+    const aheadZ = preferredZ + radius;
+    if (aheadZ < target.z) {
+      const point = firstSafeGroundPointAvoidingCollectibles(state, aheadZ, preferredXs)
+        ?? firstSafeGroundPoint(state, aheadZ, preferredXs);
+      if (point) return point;
+    }
+  }
+  return targetMissPullbackPoint({ ...state, stage: { ...state.stage, target: { ...target, visible: true } } });
+}
+
+function targetMissPullbackPoint(state: GameState): GridPoint | undefined {
+  const target = state.stage.target;
+  const preferredXs = [...new Set([target.x, Math.round(state.player.x), ...xPriority(target.x)])];
+  for (let z = target.z - 1; z >= 0; z -= 1) {
+    const withoutPancake = firstSafeGroundPointAvoidingCollectibles(state, z, preferredXs);
+    if (withoutPancake) return withoutPancake;
+    const fallback = firstSafeGroundPoint(state, z, preferredXs);
+    if (fallback) return fallback;
+  }
+  return firstSafeGroundPoint(state, state.stage.playerStart.z, preferredXs) ?? stageStart(state);
+}
+
+function firstSafeGroundPointAvoidingCollectibles(state: GameState, z: number, preferredXs: readonly number[]): GridPoint | undefined {
+  for (const x of preferredXs) {
+    if (isSafeGroundPoint(state, { x, z }, { avoidCollectibles: true })) return { x, z };
   }
   return undefined;
 }
@@ -628,43 +872,24 @@ function isGroundLane(lane: LaneState | undefined): lane is LaneState {
   return lane?.kind === "grass";
 }
 
-function rewindTargetIfTooFar(state: GameState): GameState {
-  const visibleTarget = state.stage.target.visible ? state.stage.target : state.stage.targetPending;
-  if (!visibleTarget || state.stage.mode !== "chase") return state;
-  if (visibleTarget.z - state.player.z <= TARGET_MAX_GAP_ROWS) return state;
-  const history = state.stage.targetSpawnHistory;
-  for (let index = history.length - 2; index >= 0; index -= 1) {
-    const candidate = history[index];
-    if (!candidate || candidate.z - state.player.z > TARGET_MAX_GAP_ROWS) continue;
-    return {
-      ...state,
-      stage: {
-        ...state.stage,
-        target: { ...candidate, visible: true },
-        targetEscape: undefined,
-        targetPending: undefined,
-        targetRevealAt: undefined,
-        targetSpawnHistory: history.slice(0, index + 1),
-        lastEvent: "Mr. Not So Awesome moved back into range",
-      },
-    };
-  }
-  return state;
-}
-
 function updateStageProgress(state: GameState): GameState {
   if (state.phase === "complete" || state.phase === "crashed") return state;
+  if (state.player.hop) return state;
   if (state.stage.mode !== "chase" || !state.stage.target.visible) return state;
   const playerX = Math.round(state.player.x);
   const playerZ = Math.round(state.player.z);
-  if (playerX !== state.stage.target.x || playerZ !== state.stage.target.z) return state;
+  const caughtTarget = playerX === state.stage.target.x && playerZ === state.stage.target.z;
+  const shouldPullBackToTarget = !caughtTarget && playerZ - state.stage.target.z > TARGET_AUTO_CATCH_MAX_ROWS_BEHIND;
+  if (shouldPullBackToTarget) return startTargetMissPullback(state);
+  if (!caughtTarget) return state;
   const nextTarget = findNextTargetSpawn(state);
   if (!nextTarget) return startFinalSequence(state);
   const history = [...state.stage.targetSpawnHistory, nextTarget];
   const shouldStartIntroHandoff = !state.stage.introCameraHandoffDone && state.stage.catchCount === 0;
+  const targetTravelSeconds = targetCatchHideSeconds(state);
   const targetRevealAt = shouldStartIntroHandoff
-    ? state.time + TARGET_CATCH_HIDE_SECONDS + FIRST_CATCH_CAMERA_HANDOFF_SECONDS
-    : state.time + TARGET_CATCH_HIDE_SECONDS;
+    ? state.time + targetTravelSeconds + FIRST_CATCH_CAMERA_HANDOFF_SECONDS
+    : state.time + targetTravelSeconds;
   return {
     ...state,
     queuedMove: shouldStartIntroHandoff ? undefined : state.queuedMove,
@@ -678,7 +903,49 @@ function updateStageProgress(state: GameState): GameState {
       introCameraHandoffReleaseAt: shouldStartIntroHandoff ? targetRevealAt : state.stage.introCameraHandoffReleaseAt,
       targetSpawnHistory: history,
       catchCount: state.stage.catchCount + 1,
-      lastEvent: shouldStartIntroHandoff ? "Mr. Not So Awesome is escaping" : "Mr. Not So Awesome slipped ahead",
+      lastEvent: shouldStartIntroHandoff
+        ? "Mr. Not So Awesome is escaping"
+        : "Mr. Not So Awesome slipped ahead",
+    },
+  };
+}
+
+function startTargetMissPullback(state: GameState): GameState {
+  const pullback = targetMissPullbackPoint(state);
+  return startTargetMissPullbackTo(state, pullback);
+}
+
+function startTargetMissPullbackToStart(state: GameState): GameState {
+  const start = firstSafeGroundPoint(state, state.stage.playerStart.z, [state.stage.playerStart.x])
+    ?? stageStart(state);
+  return startTargetMissPullbackTo(state, start);
+}
+
+function startTargetMissPullbackTo(state: GameState, pullback: GridPoint | undefined): GameState {
+  if (!pullback) return state;
+  return {
+    ...state,
+    queuedMove: undefined,
+    crashReason: undefined,
+    player: {
+      ...state.player,
+      hop: {
+        fromX: state.player.x,
+        fromZ: state.player.z,
+        toX: pullback.x,
+        toZ: pullback.z,
+        elapsed: 0,
+        duration: TARGET_MISS_PULLBACK_SECONDS,
+        kind: "targetPullback",
+      },
+    },
+    stage: {
+      ...state.stage,
+      target: { ...state.stage.target, visible: true },
+      targetEscape: undefined,
+      targetPending: undefined,
+      targetRevealAt: undefined,
+      lastEvent: "Target missed",
     },
   };
 }
@@ -696,8 +963,8 @@ function startFinalSequence(state: GameState): GameState {
     stage: {
       ...state.stage,
       mode: "finalSequence",
-      target: { ...state.stage.target, visible: true },
-      targetEscape: undefined,
+      target: { ...state.stage.target, visible: false },
+      targetEscape: { x: state.stage.target.x, z: state.stage.target.z, startedAt: state.time },
       targetPending: undefined,
       targetRevealAt: undefined,
       introCameraHandoffDone: true,
@@ -706,6 +973,7 @@ function startFinalSequence(state: GameState): GameState {
       finalStartedAt: state.time,
       finalRescueStartedAt: state.time + finalLineStartSeconds(2),
       finalPoofStartedAt: state.time + FINAL_DIALOGUE_TOTAL_SECONDS - 0.8,
+      finalFadeStartedAt: state.time + FINAL_DIALOGUE_TOTAL_SECONDS + FINAL_FADE_DELAY_SECONDS,
       catchCount: state.stage.catchCount + 1,
       lastEvent: "Final Ending",
     },
@@ -727,7 +995,7 @@ function isIntroCameraHandoffActive(state: GameState): boolean {
     && state.stage.introCameraHandoffReleaseAt !== undefined;
 }
 
-function isRevealConversationActive(state: GameState): boolean {
+export function isRevealConversationActive(state: GameState): boolean {
   if (state.stage.summonStartedAt === undefined || state.stage.catchCount > 0 || state.stage.introCameraHandoffStartedAt !== undefined) return false;
   return revealConversationElapsed(state) < REVEAL_TOTAL_SECONDS;
 }

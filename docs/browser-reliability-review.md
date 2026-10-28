@@ -1,15 +1,5 @@
-# Browser reliability review — 2026-10-27
+# Live deployment reliability port
 
-## Intent preserved
+The canonical production alias was serving b427765 on codex/99-lane-compact-map-experiment, not the GitHub default branch. This port preserves that live baseline, including compact map, dialogue, mobile assets and tutorial timings. Only hidden audio/render guards, playback request deduplication, and interrupted-track position recovery are ported from PR #1.
 
-Do not restore the broad mobile-runtime rewrite reverted by 5026050. Preserve editor/debug controls, artwork, and music sequencing from bff105a. Existing MusicManager intends automatic visibility recovery.
-
-## Changes
-
-Prevent hidden frame sync from restarting music; avoid redundant play calls while a request or playback is active. Resume interrupted reveal/route tracks at their previous position after pause or mute. Skip hidden rendering/simulation work.
-
-## Validation
-
-Production build; existing stage-map checks; new audio regression checks; Chromium and mobile WebKit start/reload/mute/return browser tests. No public deployment URL was found in the connected Vercel team or repository metadata.
-
-Mobile checks used WebKit on macOS with a 390×844 touch viewport. Cold-pickup fixtures position collectibles at the player and run the normal collision/score/audio path. Playback was checked through running audio contexts and started buffers, not recorded speaker output. These are not physical iPhone/Android tests. Occasional long cold frames also occur with SFX off; repeat on a real phone before treating overall frame smoothness as resolved.
+Validate production build, stage-map checks, audio checks, sites static checks and browser opening/reload before assigning the live alias.

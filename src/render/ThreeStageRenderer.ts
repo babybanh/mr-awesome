@@ -5,9 +5,15 @@ import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { GRID, type GameState, type GridPoint, type LaneState, type StageAssetId, type StageObjectKind, type StagePlacedObject } from "../game/types";
 import { getMovingSpans, getPlayerDisplayPosition, isTrainWarningActive, pancakeKey } from "../game/simulation";
 
+const USE_MOBILE_CHARACTER_ASSETS = window.matchMedia("(pointer: coarse), (max-width: 820px), (max-height: 760px)").matches;
+
 const ASSET_PATHS = {
-  player: "/assets/characters/TexturedMeshBright.glb",
-  target: "/assets/characters/MrNotSoAwesomeTexturedBright.glb",
+  player: USE_MOBILE_CHARACTER_ASSETS
+    ? "/assets/characters/TexturedMeshBright-mobile.glb"
+    : "/assets/characters/TexturedMeshBright.glb",
+  target: USE_MOBILE_CHARACTER_ASSETS
+    ? "/assets/characters/MrNotSoAwesomeTexturedBright-mobile.glb"
+    : "/assets/characters/MrNotSoAwesomeTexturedBright.glb",
   pancake: "/assets/collectibles/PancakeTexturedBright.glb",
   house01: {
     obj: "/assets/voxel-town-set/Houses/House01/House01.obj",
@@ -147,14 +153,11 @@ const PALETTE = {
 
 const BILLBOARD_COPY = [
   ["WELCOME TO", "AWESOME TOWN"],
-  ["NICE TRY", "HERO"],
-  ["FRIENDS", "THIS WAY"],
-  ["WATCH FOR", "GATORS"],
-  ["BIG", "LAKES"],
-  ["BIGGER", "ROADS"],
-  ["SECRET", "SHORTCUT"],
-  ["UP", "THE PEAKS"],
-  ["OUT OF", "ROAD"],
+  ["PANCAKE", "PLAZA"],
+  ["RAILROAD", "ROW"],
+  ["BIG LAKES", "DISTRICT"],
+  ["LOG", "LAGOON"],
+  ["FINAL BLOCK", "AHEAD"],
 ] as const;
 
 const MR_AWESOME_PLAYER_SCALE = 0.52;
@@ -234,8 +237,13 @@ export const DEFAULT_CAMERA_ZOOM_PERCENT = 150;
 const REVEAL_CAMERA_ZOOM_PERCENT = 150;
 const CHASE_CAMERA_ZOOM_PERCENT = 118;
 const CHASE_CAMERA_AHEAD_OFFSET_ROWS = 2.15;
+const CHASE_CAMERA_TOP_STOP_Z = 445;
+const CHASE_CAMERA_TOP_STOP_LEAD_ROWS = 17;
 const ESCAPE_POP_SECONDS = 0.62;
 const DECORATIVE_LOG_SPEED_MULTIPLIER = 1.2;
+const PANCAKE_IDLE_BOUNCE_INTERVAL_SECONDS = 3;
+const PANCAKE_IDLE_BOUNCE_SECONDS = 1.2;
+const TARGET_REMINDER_BOUNCE_SECONDS = 1.2;
 
 const CAMERA_SPEC = {
   smoothingSeconds: 0.14,
@@ -267,6 +275,12 @@ interface EscapeVisual {
   opacity: number;
 }
 
+interface TargetTravelVisual {
+  x: number;
+  z: number;
+  visual: EscapeVisual;
+}
+
 export interface RenderEditSelection {
   x: number;
   z: number;
@@ -277,6 +291,7 @@ export interface RenderEditSelection {
 
 export interface RenderOptions {
   useStageCamera?: boolean;
+  targetReminderActive?: boolean;
 }
 
 export class ThreeStageRenderer {
@@ -284,6 +299,8 @@ export class ThreeStageRenderer {
   private readonly camera = new THREE.OrthographicCamera(-8, 8, 8, -8, 0.1, 80);
   private readonly renderer: THREE.WebGLRenderer;
   private readonly world = new THREE.Group();
+  private readonly staticWorld = new THREE.Group();
+  private readonly dynamicWorld = new THREE.Group();
   private readonly boxGeometry = new THREE.BoxGeometry(1, 1, 1);
   private readonly planeGeometry = new THREE.PlaneGeometry(1, 1);
   private readonly materials = new Map<string, THREE.Material>();
@@ -296,12 +313,16 @@ export class ThreeStageRenderer {
   private readonly models = new Map<ModelKey, LoadedModel>();
   private readonly loadingModels = new Set<ModelKey>();
   private readonly failedModels = new Set<ModelKey>();
+  private readonly mobileRenderer = isCoarsePointer();
+  private activeWorld: THREE.Group = this.dynamicWorld;
+  private staticWorldKey = "";
   private sortedLaneCache: LaneState[] = [];
   private objectsByZ = new Map<number, StagePlacedObject[]>();
   private billboardCopyById = new Map<string, readonly [string, string]>();
   private cacheRunId = -1;
   private cameraFocusX = 0;
   private cameraFocusZ = 6;
+  private finalCameraLock: { runId: number; x: number; z: number } | undefined;
   private activeCameraPreset: CameraPresetId = DEFAULT_CAMERA_PRESET;
   private cameraZoomPercent = DEFAULT_CAMERA_ZOOM_PERCENT;
   private appliedCameraZoomPercent = DEFAULT_CAMERA_ZOOM_PERCENT;
@@ -314,9 +335,9 @@ export class ThreeStageRenderer {
       antialias: true,
       alpha: false,
       powerPreference: "high-performance",
-      preserveDrawingBuffer: true,
+      preserveDrawingBuffer: false,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.mobileRenderer ? 2 : 2.25));
     this.renderer.setClearColor(PALETTE.background);
     this.renderer.toneMapping = THREE.NoToneMapping;
     this.renderer.toneMappingExposure = 1;
@@ -331,8 +352,8 @@ export class ThreeStageRenderer {
     const rimLight = new THREE.DirectionalLight(0xc8e6ff, 0.18);
     sunLight.position.set(-5, 14, -6);
     sunLight.castShadow = true;
-    sunLight.shadow.mapSize.set(1024, 1024);
-    sunLight.shadow.radius = 3.1;
+    sunLight.shadow.mapSize.set(this.mobileRenderer ? 1024 : 1536, this.mobileRenderer ? 1024 : 1536);
+    sunLight.shadow.radius = this.mobileRenderer ? 2.4 : 3;
     sunLight.shadow.camera.left = -16;
     sunLight.shadow.camera.right = 16;
     sunLight.shadow.camera.top = 20;
@@ -340,6 +361,7 @@ export class ThreeStageRenderer {
     fillLight.position.set(5, 7, 6);
     rimLight.position.set(4, 5, -8);
     this.scene.fog = null;
+    this.world.add(this.staticWorld, this.dynamicWorld);
     this.scene.add(this.world, hemiLight, sunLight, fillLight, rimLight);
     this.resize();
     this.loadInitialAssets();
@@ -366,20 +388,29 @@ export class ThreeStageRenderer {
   render(state: GameState, deltaSeconds: number, editSelection?: RenderEditSelection, options: RenderOptions = {}): void {
     const player = getPlayerDisplayPosition(state);
     const useStageCamera = options.useStageCamera ?? true;
+    const targetReminderActive = options.targetReminderActive ?? false;
     const nextZoom = useStageCamera ? stageCameraZoomPercent(state) : this.cameraZoomPercent;
     this.applyCameraProjection(nextZoom);
     if (state.runId !== this.lastRunId) {
       this.cameraFocusX = targetCameraFocusX(player.x, state, useStageCamera);
       this.cameraFocusZ = targetCameraFocusZ(player.z, state, useStageCamera);
+      this.finalCameraLock = undefined;
       this.lastRunId = state.runId;
     }
+    if (state.stage.mode !== "finalSequence" || !useStageCamera) {
+      this.finalCameraLock = undefined;
+    } else if (this.finalCameraLock?.runId !== state.runId) {
+      this.finalCameraLock = { runId: state.runId, x: this.cameraFocusX, z: this.cameraFocusZ };
+    }
+    const targetFocusX = this.finalCameraLock?.x ?? targetCameraFocusX(player.x, state, useStageCamera);
+    const targetFocusZ = this.finalCameraLock?.z ?? targetCameraFocusZ(player.z, state, useStageCamera);
     const alpha = 1 - Math.exp(-deltaSeconds / CAMERA_SPEC.smoothingSeconds);
-    this.cameraFocusX = lerp(this.cameraFocusX, targetCameraFocusX(player.x, state, useStageCamera), alpha);
-    this.cameraFocusZ = lerp(this.cameraFocusZ, targetCameraFocusZ(player.z, state, useStageCamera), alpha);
+    this.cameraFocusX = lerp(this.cameraFocusX, targetFocusX, alpha);
+    this.cameraFocusZ = lerp(this.cameraFocusZ, targetFocusZ, alpha);
     this.positionCamera();
     this.prepareStageCaches(state);
     const renderWindow = this.visibleRenderWindow();
-    this.rebuildWorld(state, editSelection, renderWindow);
+    this.rebuildWorld(state, editSelection, renderWindow, targetReminderActive);
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -453,19 +484,50 @@ export class ThreeStageRenderer {
     };
   }
 
-  private rebuildWorld(state: GameState, editSelection: RenderEditSelection | undefined, renderWindow: RenderWindow): void {
-    this.world.clear();
-    this.addBackdrop(renderWindow);
-    this.addDecorativeLowerWaterRows(state.time, renderWindow);
-    this.addDecorativeUpperExtensionRows(state.time, state.lanes, renderWindow);
-    for (const lane of this.visibleLanes(renderWindow)) {
-      this.addLane(lane);
-      this.addStaticObjects(lane, state, this.objectsByZ.get(lane.z) ?? []);
-      if (lane.kind === "train") this.addAutomaticTrainWarningAnchors(lane, state.time);
-      this.addMovingObjects(lane, state);
+  private rebuildWorld(state: GameState, editSelection: RenderEditSelection | undefined, renderWindow: RenderWindow, targetReminderActive: boolean): void {
+    const visibleLanes = this.visibleLanes(renderWindow);
+    const staticWorldKey = this.staticLayerKey(state, renderWindow);
+    if (staticWorldKey !== this.staticWorldKey) {
+      this.staticWorld.clear();
+      this.withActiveWorld(this.staticWorld, () => {
+        this.addBackdrop(renderWindow);
+        for (const lane of visibleLanes) {
+          this.addLane(lane);
+          this.addStaticObjects(lane, this.objectsByZ.get(lane.z) ?? []);
+        }
+      });
+      this.staticWorldKey = staticWorldKey;
     }
-    this.addPlayerAndTarget(state, renderWindow);
-    if (editSelection) this.addEditSelection(editSelection);
+
+    this.dynamicWorld.clear();
+    this.withActiveWorld(this.dynamicWorld, () => {
+      this.addDecorativeLowerWaterRows(state.time, renderWindow);
+      this.addDecorativeUpperExtensionRows(state.time, state.lanes, renderWindow);
+      for (const lane of visibleLanes) {
+        this.addDynamicObjects(lane, state, this.objectsByZ.get(lane.z) ?? []);
+        if (lane.kind === "train") this.addAutomaticTrainWarningAnchors(lane, state.time);
+        this.addMovingObjects(lane, state);
+      }
+      this.addPlayerAndTarget(state, renderWindow, targetReminderActive);
+      if (editSelection) this.addEditSelection(editSelection);
+    });
+  }
+
+  private staticLayerKey(state: GameState, renderWindow: RenderWindow): string {
+    return [
+      state.runId,
+      renderWindow.minZ,
+      renderWindow.maxZ,
+      this.models.size,
+      this.failedModels.size,
+    ].join(":");
+  }
+
+  private withActiveWorld(world: THREE.Group, render: () => void): void {
+    const previousWorld = this.activeWorld;
+    this.activeWorld = world;
+    render();
+    this.activeWorld = previousWorld;
   }
 
   private visibleLanes(renderWindow: RenderWindow): LaneState[] {
@@ -514,16 +576,23 @@ export class ThreeStageRenderer {
     }
   }
 
-  private addStaticObjects(lane: LaneState, state: GameState, objects: StagePlacedObject[]): void {
+  private addStaticObjects(lane: LaneState, objects: StagePlacedObject[]): void {
     if (lane.kind !== "grass") return;
     for (const object of objects) {
       if (object.z !== lane.z) continue;
       if (object.kind === "tree") this.addTree(object.x, object.z, object.assetId);
       if (object.kind === "building") this.addBuilding(object);
-      if (object.kind === "warning") this.addWarningSign(object.x, this.groundEdgePropZ(object, state), object.assetId, this.isWarningPropActive(object, state));
       if (object.kind === "billboard") this.addBillboard(objectCenterX(object), object.z - 0.42, object.assetId, false, this.billboardCopyById.get(object.id));
+    }
+  }
+
+  private addDynamicObjects(lane: LaneState, state: GameState, objects: StagePlacedObject[]): void {
+    if (lane.kind !== "grass") return;
+    for (const object of objects) {
+      if (object.z !== lane.z) continue;
+      if (object.kind === "warning") this.addWarningSign(object.x, this.groundEdgePropZ(object, state), object.assetId, this.isWarningPropActive(object, state));
       if (object.kind === "pancake" && !state.collectedPancakes.has(pancakeKey(object.x, object.z))) {
-        const escape = pancakeEscapeVisual(object.x, object.z, state);
+        const escape = pancakeVisual(object.x, object.z, state);
         if (escape !== null) this.addPancake(object.x, object.z, object.assetId, escape);
       }
     }
@@ -735,7 +804,7 @@ export class ThreeStageRenderer {
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     if (foreground) mesh.renderOrder = 30;
-    this.world.add(mesh);
+    this.activeWorld.add(mesh);
   }
 
   private billboardTextMaterial(assetId: "billboard01" | "billboard02", foreground: boolean, copy: readonly [string, string]): THREE.MeshBasicMaterial {
@@ -784,7 +853,7 @@ export class ThreeStageRenderer {
     return object.z - 0.42;
   }
 
-  private addPlayerAndTarget(state: GameState, renderWindow: RenderWindow): void {
+  private addPlayerAndTarget(state: GameState, renderWindow: RenderWindow, targetReminderActive: boolean): void {
     const player = getPlayerDisplayPosition(state);
     if (!this.addMrAwesomePlayer(player.x, player.y, player.z)) {
       this.addPrimitiveHero(player.x, 0.08 + player.y, player.z, state.phase === "crashed");
@@ -792,45 +861,29 @@ export class ThreeStageRenderer {
 
     if (state.stage.target.visible && state.stage.target.z >= renderWindow.minZ && state.stage.target.z <= renderWindow.maxZ) {
       const target = state.stage.target;
-      const visual = finalTargetVisual(state);
+      const visual = finalTargetVisual(state, targetReminderActive);
       if (visual) {
         if (!this.addMrNotSoAwesomeTarget(target.x, target.z, visual)) {
           this.addPrimitiveTarget(target.x, target.z, visual);
         }
       }
-    } else if (state.stage.targetEscape && state.stage.targetEscape.z >= renderWindow.minZ && state.stage.targetEscape.z <= renderWindow.maxZ) {
-      const escape = escapeVisual(state.stage.targetEscape.startedAt, state.time);
-      if (escape) {
-        const target = state.stage.targetEscape;
-        if (!this.addMrNotSoAwesomeTarget(target.x, target.z, escape)) {
-          this.addPrimitiveTarget(target.x, target.z, escape);
+    } else if (state.stage.targetEscape) {
+      const travel = targetTravelVisual(state);
+      if (travel && isZInRenderWindow(travel.z, renderWindow)) {
+        if (!this.addMrNotSoAwesomeTarget(travel.x, travel.z, travel.visual)) {
+          this.addPrimitiveTarget(travel.x, travel.z, travel.visual);
+        }
+      } else if (!state.stage.targetPending && isZInRenderWindow(state.stage.targetEscape.z, renderWindow)) {
+        const escape = escapeVisual(state.stage.targetEscape.startedAt, state.time);
+        if (escape) {
+          const target = state.stage.targetEscape;
+          if (!this.addMrNotSoAwesomeTarget(target.x, target.z, escape)) {
+            this.addPrimitiveTarget(target.x, target.z, escape);
+          }
         }
       }
     }
-    this.addFinalRescueEffects(state, renderWindow);
     this.addBillboardForegroundPass(player, renderWindow);
-  }
-
-  private addFinalRescueEffects(state: GameState, renderWindow: RenderWindow): void {
-    if (state.stage.mode !== "finalSequence" || state.stage.finalRescueStartedAt === undefined) return;
-    const elapsed = state.time - state.stage.finalRescueStartedAt;
-    if (elapsed < 0 || elapsed > 3.2) return;
-    const baseZ = state.stage.target.z - 0.8;
-    if (baseZ < renderWindow.minZ || baseZ > renderWindow.maxZ) return;
-    const progress = clamp(elapsed / 1.2, 0, 1);
-    const pop = Math.sin(progress * Math.PI);
-    const opacity = clamp(1 - Math.max(0, elapsed - 2.2), 0, 1);
-    const baseX = (state.player.x + state.stage.target.x) / 2;
-    const offsets = [-0.86, 0, 0.86];
-    offsets.forEach((offset, index) => {
-      const x = baseX + offset;
-      const z = baseZ + (index - 1) * 0.22;
-      const y = 0.42 + pop * 0.34 + index * 0.05;
-      this.addBox(x, y, z, 0.34, 0.34, 0.28, index === 1 ? PALETTE.playerRed : PALETTE.pancakeBase, true, opacity, true);
-      this.addBox(x, y + 0.28, z - 0.03, 0.24, 0.18, 0.2, index === 1 ? PALETTE.playerYellow : PALETTE.butterColor, true, opacity, true);
-      this.addBox(x + 0.28, y + 0.55 + pop * 0.08, z - 0.08, 0.08, 0.08, 0.04, PALETTE.butterColor, false, opacity, true);
-      this.addBox(x - 0.26, y + 0.5 + pop * 0.1, z + 0.06, 0.07, 0.07, 0.04, PALETTE.warningYellow, false, opacity, true);
-    });
   }
 
   private addPrimitiveHero(x: number, y: number, z: number, crashed: boolean): void {
@@ -919,7 +972,7 @@ export class ThreeStageRenderer {
       MR_AWESOME_PLAYER_SCALE,
       MR_AWESOME_PLAYER_SCALE,
     );
-    this.world.add(clone);
+    this.activeWorld.add(clone);
     return true;
   }
 
@@ -948,7 +1001,7 @@ export class ThreeStageRenderer {
       scale * MR_NOT_SO_AWESOME_HEIGHT_SCALE * equalizer.y * visual.scale,
       scale * equalizer.z * visual.scale,
     );
-    this.world.add(clone);
+    this.activeWorld.add(clone);
     return true;
   }
 
@@ -968,7 +1021,7 @@ export class ThreeStageRenderer {
       PANCAKE_MODEL_SCALE_Y * visual.scale,
       PANCAKE_MODEL_SCALE_XZ * visual.scale,
     );
-    this.world.add(clone);
+    this.activeWorld.add(clone);
     return true;
   }
 
@@ -990,7 +1043,7 @@ export class ThreeStageRenderer {
       bounds.depth / Math.max(0.001, model.size.z),
     );
     group.add(clone);
-    this.world.add(group);
+    this.activeWorld.add(group);
     return true;
   }
 
@@ -1001,7 +1054,7 @@ export class ThreeStageRenderer {
     mesh.castShadow = castShadow && !foreground;
     mesh.receiveShadow = !foreground;
     if (foreground) mesh.renderOrder = 30;
-    this.world.add(mesh);
+    this.activeWorld.add(mesh);
   }
 
   private material(color: number, opacity: number, foreground = false): THREE.Material {
@@ -1023,8 +1076,8 @@ export class ThreeStageRenderer {
 
   private loadInitialAssets(): void {
     this.loadModel("player");
-    this.loadModel("target");
-    this.loadModel("pancake");
+    window.setTimeout(() => this.loadModel("target"), 260);
+    window.setTimeout(() => this.loadModel("pancake"), 620);
   }
 
   private loadModel(key: ModelKey): void {
@@ -1078,11 +1131,13 @@ export class ThreeStageRenderer {
       size: box.getSize(new THREE.Vector3()),
     });
     this.loadingModels.delete(key);
+    this.staticWorldKey = "";
   }
 
   private markModelFailed(key: ModelKey, error: unknown): void {
     this.loadingModels.delete(key);
     this.failedModels.add(key);
+    this.staticWorldKey = "";
     console.warn(`Could not load ${String(key)} model; using primitive fallback.`, error);
   }
 
@@ -1119,7 +1174,12 @@ function targetCameraFocusX(playerX: number, state: GameState, useStageCamera: b
 
 function targetCameraFocusZ(playerZ: number, state: GameState, useStageCamera: boolean): number {
   const laneMaxZ = Math.max(...state.lanes.keys());
-  const topStopPlayerZ = Math.max(CAMERA_SPEC.bottomAnchorPlayerZ, laneMaxZ - CAMERA_SPEC.topBoundaryLeadRows);
+  const authoredTopStopZ = laneMaxZ - CAMERA_SPEC.topBoundaryLeadRows;
+  const dynamicTopStopZ = laneMaxZ - CHASE_CAMERA_TOP_STOP_LEAD_ROWS;
+  const topStopPlayerZ = Math.max(
+    CAMERA_SPEC.bottomAnchorPlayerZ,
+    Math.min(authoredTopStopZ, CHASE_CAMERA_TOP_STOP_Z, dynamicTopStopZ),
+  );
   if (useStageCamera && state.stage.mode === "introPancakes") return rawCameraFocusZ(CAMERA_SPEC.bottomAnchorPlayerZ);
   if (useStageCamera && state.stage.mode === "summoning" && state.stage.target.visible) {
     return introRevealCameraFocusZ(state, topStopPlayerZ);
@@ -1143,7 +1203,6 @@ function targetCameraFocusZ(playerZ: number, state: GameState, useStageCamera: b
 }
 
 function stageCameraZoomPercent(state: GameState): number {
-  if (state.stage.mode === "finalSequence") return 138;
   if (state.stage.mode === "introPancakes" || state.stage.mode === "summoning") return REVEAL_CAMERA_ZOOM_PERCENT;
   if (state.stage.mode === "chase" && !state.stage.introCameraHandoffDone) {
     if (state.stage.introCameraHandoffStartedAt !== undefined && state.stage.introCameraHandoffReleaseAt !== undefined) {
@@ -1167,7 +1226,8 @@ function introRevealCameraFocusZ(state: GameState, topStopPlayerZ: number): numb
 }
 
 function chaseCameraFocusZ(playerZ: number, topStopPlayerZ: number): number {
-  return rawCameraFocusZ(clamp(playerZ + CHASE_CAMERA_AHEAD_OFFSET_ROWS, CAMERA_SPEC.bottomAnchorPlayerZ, topStopPlayerZ));
+  const effectivePlayerZ = clamp(playerZ, CAMERA_SPEC.bottomAnchorPlayerZ, topStopPlayerZ);
+  return rawCameraFocusZ(effectivePlayerZ + CHASE_CAMERA_AHEAD_OFFSET_ROWS);
 }
 
 function stableQuarterTurn(x: number, z: number): number {
@@ -1221,8 +1281,8 @@ function defaultEscapeVisual(): EscapeVisual {
   return { yOffset: 0, zOffset: 0, scale: 1, opacity: 1 };
 }
 
-function finalTargetVisual(state: GameState): EscapeVisual | null {
-  if (state.stage.mode !== "finalSequence") return defaultEscapeVisual();
+function finalTargetVisual(state: GameState, targetReminderActive: boolean): EscapeVisual | null {
+  if (state.stage.mode !== "finalSequence") return targetNudgeVisual(state, targetReminderActive);
   if (state.stage.finalPoofStartedAt !== undefined && state.time >= state.stage.finalPoofStartedAt) {
     return escapeVisual(state.stage.finalPoofStartedAt, state.time, 0.23);
   }
@@ -1232,12 +1292,112 @@ function finalTargetVisual(state: GameState): EscapeVisual | null {
   return { ...defaultEscapeVisual(), zOffset: shake, scale: 1 + (surpriseSeconds < 0.5 ? Math.sin(surpriseSeconds * Math.PI * 4) * 0.035 : 0) };
 }
 
-function pancakeEscapeVisual(x: number, z: number, state: GameState): EscapeVisual | null {
+function targetNudgeVisual(state: GameState, targetReminderActive: boolean): EscapeVisual {
+  if (state.stage.mode !== "chase" || !state.stage.target.visible || Math.round(state.player.z) <= state.stage.target.z) {
+    return targetReminderActive ? targetReminderBounceVisual(state) : defaultEscapeVisual();
+  }
+  if (targetReminderActive) {
+    return targetReminderBounceVisual(state);
+  }
+  const cycle = state.time % 2;
+  if (cycle > 0.42) return defaultEscapeVisual();
+  const pulse = Math.sin((cycle / 0.42) * Math.PI);
+  return {
+    yOffset: 0.03 * pulse,
+    zOffset: Math.sin(cycle * 80) * 0.045 * pulse,
+    scale: 1 + 0.055 * pulse,
+    opacity: 1,
+  };
+}
+
+function targetReminderBounceVisual(state: GameState): EscapeVisual {
+  const cycle = state.time % TARGET_REMINDER_BOUNCE_SECONDS;
+  const progress = clamp(cycle / TARGET_REMINDER_BOUNCE_SECONDS, 0, 1);
+  const fade = Math.sin(progress * Math.PI);
+  const bounce = Math.max(0, Math.sin(progress * Math.PI * 2)) * fade;
+  return {
+    yOffset: 0.16 * bounce,
+    zOffset: 0,
+    scale: 1 + 0.045 * bounce,
+    opacity: 1,
+  };
+}
+
+function pancakeVisual(x: number, z: number, state: GameState): EscapeVisual | null {
   const key = pancakeKey(x, z);
-  if (!state.stage.stolenPancakes.has(key)) return defaultEscapeVisual();
+  if (!state.stage.stolenPancakes.has(key)) return pancakeIdleBounceVisual(x, z, state);
   const startedAt = state.stage.stolenPancakesStartedAt;
   if (startedAt === undefined || state.time <= startedAt) return defaultEscapeVisual();
   return escapeVisual(startedAt, state.time, x * 0.017 + z * 0.011);
+}
+
+function pancakeIdleBounceVisual(x: number, z: number, state: GameState): EscapeVisual {
+  const firstPancakeAt = state.stage.firstPancakeAt;
+  if (
+    state.stage.mode !== "introPancakes"
+    || firstPancakeAt === undefined
+    || state.stage.target.visible
+    || state.stage.summonStartedAt !== undefined
+    || z > state.stage.summonMarker.z
+  ) {
+    return defaultEscapeVisual();
+  }
+  const elapsed = state.time - firstPancakeAt;
+  if (elapsed < PANCAKE_IDLE_BOUNCE_INTERVAL_SECONDS) return defaultEscapeVisual();
+  const cycle = (elapsed - PANCAKE_IDLE_BOUNCE_INTERVAL_SECONDS) % PANCAKE_IDLE_BOUNCE_INTERVAL_SECONDS;
+  if (cycle > PANCAKE_IDLE_BOUNCE_SECONDS) return defaultEscapeVisual();
+  const stagger = positiveModulo(x + z, 3) * 0.08;
+  const progress = clamp((cycle - stagger) / PANCAKE_IDLE_BOUNCE_SECONDS, 0, 1);
+  const fade = Math.sin(progress * Math.PI);
+  const bounce = Math.max(0, Math.sin(progress * Math.PI * 2)) * fade;
+  return {
+    yOffset: 0.18 * bounce,
+    zOffset: 0,
+    scale: 1 + 0.045 * bounce,
+    opacity: 1,
+  };
+}
+
+function targetTravelVisual(state: GameState): TargetTravelVisual | null {
+  const from = state.stage.targetEscape;
+  const to = state.stage.targetPending;
+  if (!from || !to) return null;
+  const revealAt = state.stage.targetRevealAt ?? from.startedAt + ESCAPE_POP_SECONDS;
+  const duration = Math.max(0.18, revealAt - from.startedAt);
+  const progress = clamp((state.time - from.startedAt) / duration, 0, 1);
+  if (progress >= 1) return null;
+  const eased = targetFlightProgress(progress);
+  const arc = Math.sin(eased * Math.PI);
+  const landing = progress > 0.82 ? easeOutCubic((progress - 0.82) / 0.18) : 0;
+  const lateralOffset = targetFlightLateralOffset(from.x, from.z, to.x, to.z, state.stage.catchCount, progress);
+  return {
+    x: lerp(from.x, to.x, eased) + lateralOffset,
+    z: lerp(from.z, to.z, eased),
+    visual: {
+      yOffset: 0.24 * easeInCubic(progress) + 0.52 * arc - 0.1 * landing,
+      zOffset: 0.018 * Math.sin(progress * Math.PI * 7) * arc,
+      scale: 1 + 0.08 * arc - 0.04 * landing,
+      opacity: 1,
+    },
+  };
+}
+
+function targetFlightProgress(progress: number): number {
+  if (progress < 0.38) return 0.18 * easeInCubic(progress / 0.38);
+  return 0.18 + 0.82 * easeOutCubic((progress - 0.38) / 0.62);
+}
+
+function targetFlightLateralOffset(fromX: number, fromZ: number, toX: number, toZ: number, catchCount: number, progress: number): number {
+  const seed = positiveModulo(Math.round((fromX + 9) * 31 + (fromZ + 3) * 17 + (toX + 11) * 43 + (toZ + 5) * 13 + catchCount * 29), 6);
+  if (seed === 0) return 0;
+  const direction = seed % 2 === 0 ? 1 : -1;
+  const amplitude = seed <= 2 ? 0.24 : 0.34;
+  if (seed <= 2) return direction * amplitude * Math.sin(progress * Math.PI);
+  return direction * amplitude * Math.sin(progress * Math.PI * 2) * 0.82;
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
 }
 
 function escapeVisual(startedAt: number, time: number, driftSeed = 0): EscapeVisual | null {
@@ -1262,6 +1422,10 @@ function easeOutCubic(value: number): number {
 
 function easeInCubic(value: number): number {
   return value * value * value;
+}
+
+function isZInRenderWindow(z: number, renderWindow: RenderWindow): boolean {
+  return z >= renderWindow.minZ && z <= renderWindow.maxZ;
 }
 
 function setObjectOpacity(object: THREE.Object3D, opacity: number): void {
@@ -1333,7 +1497,7 @@ function drawFittedText(
 }
 
 function enhanceLoadedAssetMaterials(key: ModelKey, source: THREE.Object3D): void {
-  if (key !== "target" && key !== "pancake") return;
+  if (key !== "player" && key !== "target" && key !== "pancake") return;
   const seen = new Set<THREE.Material>();
   source.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
@@ -1346,24 +1510,31 @@ function enhanceLoadedAssetMaterials(key: ModelKey, source: THREE.Object3D): voi
   });
 }
 
-function enhanceMaterialForAsset(key: "target" | "pancake", material: THREE.Material): void {
+function enhanceMaterialForAsset(key: "player" | "target" | "pancake", material: THREE.Material): void {
   const colorMaterial = material as THREE.Material & {
     color?: THREE.Color;
     emissive?: THREE.Color;
     emissiveIntensity?: number;
     roughness?: number;
+    map?: THREE.Texture | null;
   };
+  if (colorMaterial.map) {
+    colorMaterial.map.colorSpace = THREE.SRGBColorSpace;
+    colorMaterial.map.anisotropy = Math.max(colorMaterial.map.anisotropy, 8);
+    colorMaterial.map.magFilter = THREE.LinearFilter;
+    colorMaterial.map.minFilter = THREE.LinearMipmapLinearFilter;
+    colorMaterial.map.needsUpdate = true;
+  }
   if (colorMaterial.color) {
     if (key === "pancake") colorMaterial.color.offsetHSL(0.015, 0.16, 0.08);
-    else colorMaterial.color.offsetHSL(0, 0.08, 0.07);
+    else if (key === "target") colorMaterial.color.offsetHSL(0, 0.08, 0.07);
   }
   if (colorMaterial.emissive) {
-    const glow = key === "pancake" ? new THREE.Color(0xff9f2d) : new THREE.Color(0xcfd7e8);
-    colorMaterial.emissive.copy(glow);
-    colorMaterial.emissiveIntensity = key === "pancake" ? 0.18 : 0.1;
+    colorMaterial.emissive.set(0x000000);
+    colorMaterial.emissiveIntensity = 0;
   }
   if (typeof colorMaterial.roughness === "number") {
-    colorMaterial.roughness = key === "pancake" ? Math.min(colorMaterial.roughness, 0.62) : Math.min(colorMaterial.roughness, 0.7);
+    colorMaterial.roughness = key === "pancake" ? Math.min(colorMaterial.roughness, 0.62) : Math.min(colorMaterial.roughness, 0.68);
   }
   material.needsUpdate = true;
 }
@@ -1376,4 +1547,8 @@ function disposeModel(model: THREE.Object3D | undefined): void {
     const materials = Array.isArray(object.material) ? object.material : [object.material];
     for (const material of materials) material.dispose();
   });
+}
+
+function isCoarsePointer(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse), (hover: none)").matches;
 }

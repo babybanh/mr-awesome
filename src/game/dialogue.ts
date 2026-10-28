@@ -6,10 +6,13 @@ export type DialogueEventType =
   | "OPENING_TUTORIAL"
   | "PANCAKE_COLLECTED"
   | "PANCAKES_4_OF_5"
+  | "PANCAKE_REMINDER"
   | "VILLAIN_REVEAL"
   | "FIRST_CATCH_HANDOFF"
   | "TARGET_CAUGHT"
+  | "TARGET_MISSED"
   | "PLAYER_HIT"
+  | "FIRST_RIVER_CLEARED"
   | "FIRST_OBSTACLE"
   | "REPEATED_FAILURE"
   | "TERRAIN_BREADCRUMB"
@@ -60,23 +63,32 @@ const SPEAKER_LABELS: Record<DialogueSpeaker, string> = {
   B: "MR. NOT SO AWESOME",
 };
 
-export const REVEAL_LINE_DURATIONS = [4.2, 3.8, 3.4] as const;
+export const REVEAL_LINE_DURATIONS = [3.65, 3.3, 3.05] as const;
 export const REVEAL_TOTAL_SECONDS = REVEAL_LINE_DURATIONS.reduce((total, duration) => total + duration, 0);
-export const FINAL_LINE_DURATIONS = [3.4, 3.1, 3.8, 3.4] as const;
-const FINAL_LINE_GAP_SECONDS = 0.65;
+export const FINAL_LINE_DURATIONS = [2.0, 2.7, 3.7, 3.4] as const;
+export const FINAL_LINE_GAP_SECONDS = 0.4;
 
 const REVEAL_SEQUENCE: readonly DialogueLine[] = [
-  line("B", "Thanks for the pancakes. I trapped your friends too!", 100, "VILLAIN_REVEAL", 4.2),
-  line("A", "My friends? Give them back!", 100, "VILLAIN_REVEAL", 3.8),
-  line("B", "Catch me first, hero!", 100, "VILLAIN_REVEAL", 3.4),
+  line("B", "Thanks for the pancakes. I trapped your friends too!", 100, "VILLAIN_REVEAL", 3.65),
+  line("A", "My friends? Give them back!", 100, "VILLAIN_REVEAL", 3.3),
+  line("B", "Catch me first, hero!", 100, "VILLAIN_REVEAL", 3.05),
 ];
 
 const FINAL_SEQUENCE: readonly DialogueLine[] = [
-  line("B", "No! I ran out of road!", 110, "FINAL_ENDING", 3.4),
-  line("A", "Then give back my friends!", 110, "FINAL_ENDING", 3.1),
-  line("B", "Fine! They’re safe. Pancakes too!", 110, "FINAL_ENDING", 3.8),
-  line("A", "Pancakes for everybody!", 110, "FINAL_ENDING", 3.4, "success"),
+  line("B", "No! I forgot to build an exit!", 110, "FINAL_ENDING", FINAL_LINE_DURATIONS[0]),
+  line("A", "Your villain days are over!", 110, "FINAL_ENDING", FINAL_LINE_DURATIONS[1]),
+  line("B", "Fine! Your friends are free. Even the pancakes!", 110, "FINAL_ENDING", FINAL_LINE_DURATIONS[2]),
+  line("A", "Heroes together, pancakes forever!", 110, "FINAL_ENDING", FINAL_LINE_DURATIONS[3], "success"),
 ];
+
+const OPENING_TUTORIAL_LINES = [
+  "Use arrows. Grab pancakes!",
+  "Pancakes, please!",
+  "Try the arrow keys — I see pancakes!",
+  "Let’s get pancakes!",
+] as const;
+
+const OPENING_TUTORIAL_LINE = OPENING_TUTORIAL_LINES[Math.floor(Math.random() * OPENING_TUTORIAL_LINES.length)] ?? OPENING_TUTORIAL_LINES[0];
 
 const PANCAKE_LINES = [
   "Pancakes!",
@@ -96,9 +108,28 @@ const PANCAKE_ALMOST_LINES = [
   "My friends will be so happy!",
 ] as const;
 
+const PANCAKE_REMINDER_LINES = [
+  "More pancakes, please!",
+  "I'm still hungry for pancakes...",
+] as const;
+
+const PANCAKE_REMINDER_MIN_COUNT = 3;
+const PANCAKE_REMINDER_MAX_COUNT = 4;
+const PANCAKE_REMINDER_INTERVAL_SECONDS = 8;
+
 const FIRST_CATCH_LINES = [
   "Nice try, hero. Now the real chase starts!",
 ] as const;
+
+const TARGET_MISSED_LINES = [
+  "You forgot to catch me, young hero!",
+  "Wrong way, hero. I'm over here!",
+  "Pancakes later. Catch me first!",
+  "Catch me to keep going!",
+] as const;
+
+const FIRST_TARGET_REMINDER_DELAY_SECONDS = 3;
+const FIRST_TARGET_REMINDER_REPEAT_SECONDS = 3;
 
 const A_CATCH_LINES = [
   "Got you!",
@@ -470,6 +501,10 @@ const WATER_TUTORIAL_LINES = [
   "Water means wait for logs.",
 ] as const;
 
+const FIRST_RIVER_CLEARED_LINES = [
+  "Phew! That was scary.",
+] as const;
+
 const TRAIN_TUTORIAL_LINES = [
   "Whoa, train! Wait!",
   "Hear that train?",
@@ -515,7 +550,7 @@ const B_TERRAIN_LINES: Record<DialogueTerrainTag, readonly string[]> = {
   MIXED_HARD: [
     "Busy part ahead!",
     "Roads, logs, chaos!",
-    "Pick carefully, hero.",
+    "Move carefully, hero.",
     "This part is tricky.",
     "Everything is happening!",
   ],
@@ -549,10 +584,15 @@ export class DialogueDirector {
   private sameSpeakerCatchStreak = 0;
   private recentCatchTexts: string[] = [];
   private suppressAmbientUntil = 0;
+  private introPancakeReminderCount: number | undefined;
+  private nextIntroPancakeReminderAt = Number.POSITIVE_INFINITY;
+  private nextIntroPancakeReminderIndex = 0;
+  private nextFirstTargetReminderAt = Number.POSITIVE_INFINITY;
 
   update(previous: GameState | undefined, state: GameState, options: DialogueOptions): DialoguePanel | undefined {
     if (state.runId !== this.lastRunId) this.reset(state.runId);
     this.trackTargetRespawn(previous, state);
+    this.trackIntroPancakeReminder(state);
 
     const finalPanel = finalSequencePanel(state);
     if (finalPanel) {
@@ -576,7 +616,7 @@ export class DialogueDirector {
 
     if (isFirstCatchHandoff(state)) {
       this.active = undefined;
-      return panelFromLine(line("B", FIRST_CATCH_LINES[0], 95, "FIRST_CATCH_HANDOFF", 2.6, "instruction"), state.time + 0.3);
+      return panelFromLine(line("B", FIRST_CATCH_LINES[0], 95, "FIRST_CATCH_HANDOFF", 2.86, "instruction"), state.time + 0.3);
     }
 
     const eventLine = this.eventLine(previous, state);
@@ -613,6 +653,10 @@ export class DialogueDirector {
     this.sameSpeakerCatchStreak = 0;
     this.recentCatchTexts = [];
     this.suppressAmbientUntil = 0;
+    this.introPancakeReminderCount = undefined;
+    this.nextIntroPancakeReminderAt = Number.POSITIVE_INFINITY;
+    this.nextIntroPancakeReminderIndex = 0;
+    this.nextFirstTargetReminderAt = Number.POSITIVE_INFINITY;
   }
 
   private eventLine(previous: GameState | undefined, state: GameState): DialogueLine | undefined {
@@ -626,11 +670,31 @@ export class DialogueDirector {
       this.catchesSinceLastHit = 0;
       this.lastHitTime = state.time;
       const pool = this.repeatedHitCount >= 2 ? A_REPEATED_HELP_LINES : A_HIT_LINES;
+      const forceMilestoneHitLine = this.repeatedHitCount === 1 || this.repeatedHitCount === 3;
       return this.pickLine("A", pool, 85, "PLAYER_HIT", state, {
         tone: "danger",
         duration: durationForText(pool[0] ?? "", "tiny"),
-        cooldownKey: "hit",
+        cooldownKey: forceMilestoneHitLine ? undefined : "hit",
         cooldownSeconds: 2.2,
+      });
+    }
+
+    const targetMissed = state.stage.lastEvent === "Target missed" && previous.stage.lastEvent !== "Target missed";
+    if (targetMissed) {
+      this.suppressAmbientUntil = state.time + 2.4;
+      if (this.active?.eventType === "TARGET_MISSED" && this.active.expiresAt > state.time) return undefined;
+      return this.pickLine("B", TARGET_MISSED_LINES, 108, "TARGET_MISSED", state, {
+        tone: "instruction",
+        duration: durationForText(TARGET_MISSED_LINES[0] ?? "", "tutorial"),
+      });
+    }
+
+    if (state.stage.firstRiverClearedAt !== undefined && previous.stage.firstRiverClearedAt === undefined) {
+      return this.pickLine("A", FIRST_RIVER_CLEARED_LINES, 96, "FIRST_RIVER_CLEARED", state, {
+        tone: "success",
+        duration: 3.1,
+        cooldownKey: "first-river-cleared",
+        cooldownSeconds: 60,
       });
     }
 
@@ -640,20 +704,23 @@ export class DialogueDirector {
 
     if (state.stage.mode === "introPancakes" && state.collectedPancakes.size > previous.collectedPancakes.size) {
       const introCount = countIntroPancakes(state);
-      if (introCount >= 4) {
+      if (introCount === 1) {
+        return this.pickLine("A", PANCAKE_LINES, 20, "PANCAKE_COLLECTED", state, {
+          tone: "neutral",
+          duration: 2.2,
+          cooldownKey: "pancake-first",
+          cooldownSeconds: 60,
+        });
+      }
+      if (introCount === 3) {
         return this.pickLine("A", PANCAKE_ALMOST_LINES, 30, "PANCAKES_4_OF_5", state, {
           tone: "instruction",
           duration: 3.1,
-          cooldownKey: "pancake",
-          cooldownSeconds: 3.2,
+          cooldownKey: "pancake-third",
+          cooldownSeconds: 60,
         });
       }
-      return this.pickLine("A", PANCAKE_LINES, 20, "PANCAKE_COLLECTED", state, {
-        tone: "neutral",
-        duration: 2.2,
-        cooldownKey: "pancake",
-        cooldownSeconds: 4.5,
-      });
+      return undefined;
     }
 
     return undefined;
@@ -662,20 +729,20 @@ export class DialogueDirector {
   private ambientLine(state: GameState): DialogueLine | undefined {
     if (state.phase !== "running" || isDangerLane(state) || isRevealSuppressed(state)) return undefined;
     if (state.time < this.suppressAmbientUntil) return undefined;
-    if (state.time < this.nextAmbientAttemptAt) return undefined;
-    this.nextAmbientAttemptAt = state.time + 4 + seededUnit(state) * 3;
 
     if (state.stage.mode === "introPancakes") {
-      return this.pickLine("A", PANCAKE_LINES, 10, "PANCAKE_COLLECTED", state, {
-        tone: "neutral",
-        duration: 3.0,
-        cooldownKey: "intro-ambient",
-        cooldownSeconds: 4.5,
-      });
+      return this.introPancakeReminderLine(state);
     }
+
+    const firstTargetReminder = this.firstTargetReminderLine(state);
+    if (firstTargetReminder) return firstTargetReminder;
+
+    if (state.time < this.nextAmbientAttemptAt) return undefined;
+    this.nextAmbientAttemptAt = state.time + 7 + seededUnit(state) * 5;
 
     if (state.stage.mode === "summoning") return undefined;
     if (state.stage.mode !== "chase") return undefined;
+    if (state.stage.catchCount < 1) return undefined;
 
     const obstacle = firstUnseenObstacleAhead(state, this.oneShots);
     if (obstacle) {
@@ -690,7 +757,7 @@ export class DialogueDirector {
     }
 
     if (state.stage.catchCount < 2) return undefined;
-    const cooldown = state.stage.catchCount >= 3 ? 4.5 : 6.5;
+    const cooldown = state.stage.catchCount >= 3 ? 10 : 12;
     const tag = terrainTagForState(state);
     return this.pickLine("B", B_TERRAIN_LINES[tag], 45, "TERRAIN_BREADCRUMB", state, {
       tone: "neutral",
@@ -753,6 +820,55 @@ export class DialogueDirector {
     if (targetBecameVisible || targetMovedWhileVisible) this.lastTargetRespawnTime = state.time;
   }
 
+  private trackIntroPancakeReminder(state: GameState): void {
+    if (state.stage.mode !== "introPancakes") {
+      if (this.active?.eventType === "PANCAKE_REMINDER") this.active = undefined;
+      this.introPancakeReminderCount = undefined;
+      this.nextIntroPancakeReminderAt = Number.POSITIVE_INFINITY;
+      return;
+    }
+    const introCount = countIntroPancakes(state);
+    if (introCount < PANCAKE_REMINDER_MIN_COUNT || introCount > PANCAKE_REMINDER_MAX_COUNT) {
+      if (this.active?.eventType === "PANCAKE_REMINDER") this.active = undefined;
+      this.introPancakeReminderCount = undefined;
+      this.nextIntroPancakeReminderAt = Number.POSITIVE_INFINITY;
+      return;
+    }
+    if (this.introPancakeReminderCount === introCount) return;
+    if (this.active?.eventType === "PANCAKE_REMINDER") this.active = undefined;
+    this.introPancakeReminderCount = introCount;
+    this.nextIntroPancakeReminderAt = state.time + PANCAKE_REMINDER_INTERVAL_SECONDS;
+    this.nextIntroPancakeReminderIndex = Math.floor(seededUnit(state) * PANCAKE_REMINDER_LINES.length) % PANCAKE_REMINDER_LINES.length;
+  }
+
+  private introPancakeReminderLine(state: GameState): DialogueLine | undefined {
+    if (this.introPancakeReminderCount === undefined || state.time < this.nextIntroPancakeReminderAt) return undefined;
+    const text = PANCAKE_REMINDER_LINES[this.nextIntroPancakeReminderIndex] ?? PANCAKE_REMINDER_LINES[0];
+    this.nextIntroPancakeReminderIndex = (this.nextIntroPancakeReminderIndex + 1) % PANCAKE_REMINDER_LINES.length;
+    this.nextIntroPancakeReminderAt = state.time + PANCAKE_REMINDER_INTERVAL_SECONDS;
+    return line("A", text, 35, "PANCAKE_REMINDER", durationForText(text, "normal"), "instruction");
+  }
+
+  private firstTargetReminderLine(state: GameState): DialogueLine | undefined {
+    if (!isFirstTargetReminderState(state)) {
+      this.nextFirstTargetReminderAt = Number.POSITIVE_INFINITY;
+      return undefined;
+    }
+    const readyAt = firstTargetReminderReadyAt(state);
+    if (!Number.isFinite(this.nextFirstTargetReminderAt)) this.nextFirstTargetReminderAt = readyAt;
+    else this.nextFirstTargetReminderAt = Math.max(this.nextFirstTargetReminderAt, readyAt);
+    if (state.time < this.nextFirstTargetReminderAt) return undefined;
+
+    const lineToShow = this.pickLine("B", TARGET_MISSED_LINES, 108, "TARGET_MISSED", state, {
+      tone: "instruction",
+      duration: durationForText(TARGET_MISSED_LINES[0] ?? "", "tutorial"),
+    });
+    const duration = lineToShow?.duration ?? durationForText(TARGET_MISSED_LINES[0] ?? "", "tutorial");
+    this.nextFirstTargetReminderAt = state.time + duration + FIRST_TARGET_REMINDER_REPEAT_SECONDS;
+    this.suppressAmbientUntil = state.time + duration;
+    return lineToShow;
+  }
+
   private catchLine(state: GameState): DialogueLine | undefined {
     if (this.active?.eventType === "TARGET_CAUGHT" && state.time - this.active.startedAt < 1.0) return undefined;
 
@@ -767,7 +883,7 @@ export class DialogueDirector {
       this.lastCleanCatchCommentAt = state.time;
       this.lastCleanCatchCount = this.catchesSinceLastHit;
     }
-    this.suppressAmbientUntil = state.time + 1.5;
+    this.suppressAmbientUntil = state.time + 5.5;
     this.recentCatchTexts = [text, ...this.recentCatchTexts.filter((recent) => recent !== text)].slice(0, 12);
     this.repeatedHitCount = 0;
     if (this.lastCatchSpeaker === speaker) this.sameSpeakerCatchStreak += 1;
@@ -900,17 +1016,24 @@ function isFirstCatchHandoff(state: GameState): boolean {
     && state.stage.introCameraHandoffReleaseAt !== undefined;
 }
 
+function isFirstTargetReminderState(state: GameState): boolean {
+  return state.phase === "running"
+    && state.stage.mode === "chase"
+    && state.stage.catchCount === 0
+    && !state.stage.introCameraHandoffDone
+    && state.stage.target.visible;
+}
+
+function firstTargetReminderReadyAt(state: GameState): number {
+  if (state.stage.summonStartedAt === undefined) return Number.NEGATIVE_INFINITY;
+  return state.stage.summonStartedAt + REVEAL_TOTAL_SECONDS + FIRST_TARGET_REMINDER_DELAY_SECONDS;
+}
+
 function openingTutorialPanel(state: GameState): DialoguePanel | undefined {
-  if (state.stage.mode === "postVictoryTutorial") {
-    return fixedPanel("A", "Hey there!\nI’m hungry for pancakes!", "instruction", "OPENING_TUTORIAL");
-  }
   if (state.stage.mode !== "introPancakes" || state.phase !== "ready" && state.phase !== "running") return undefined;
   if (state.collectedPancakes.size > 0 || state.stage.firstPancakeAt !== undefined) return undefined;
   if (state.player.x !== state.stage.playerStart.x || state.player.z !== state.stage.playerStart.z || state.player.hop) return undefined;
-  const text = state.time >= 5
-    ? "Try the arrows!"
-    : "Hey there! I'm hungry for pancakes...";
-  return fixedPanel("A", text, "instruction", "OPENING_TUTORIAL");
+  return fixedPanel("A", OPENING_TUTORIAL_LINE, "instruction", "OPENING_TUTORIAL");
 }
 
 function finalSequencePanel(state: GameState): DialoguePanel | undefined {

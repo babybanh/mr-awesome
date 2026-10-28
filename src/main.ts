@@ -1,12 +1,44 @@
 import "./styles.css";
-import { applyAction, applyStage, createInitialState, enterCheatMode, phaseLabel, tickGame } from "./game/simulation";
+import { advanceTargetToNextSpawn, applyAction, applyStage, createInitialState, enterCheatMode, isRevealConversationActive, jumpCheatToEnding, phaseLabel, tickGame } from "./game/simulation";
 import { baselineStageMap, copyStageObject, cycleStageObjectAsset, exportStageFeedback, moveStageObject, objectAt, parseStageMap, serializeStageLane, validateStageMap } from "./game/stageMap";
 import type { GameAction, GameState, GridPoint, MoveAction, MoveStageObjectResult, StageDefinition, StagePlacedObject } from "./game/types";
-import { DialogueDirector } from "./game/dialogue";
+import { DialogueDirector, type DialoguePanel } from "./game/dialogue";
 import { MusicManager } from "./game/MusicManager";
 import { SfxManager } from "./game/SfxManager";
 import { CAMERA_PRESET_OPTIONS, DEFAULT_CAMERA_PRESET, DEFAULT_CAMERA_ZOOM_PERCENT, ThreeStageRenderer, type CameraPresetId, type RenderEditSelection } from "./render/ThreeStageRenderer";
 import { VillainAvatarRenderer, type AvatarModelDefinition } from "./render/VillainAvatarRenderer";
+
+function syncViewportMetrics(): void {
+  const viewport = window.visualViewport;
+  const width = Math.max(260, Math.round(viewport?.width ?? window.innerWidth));
+  const height = Math.max(300, Math.round(viewport?.height ?? window.innerHeight));
+  const root = document.documentElement;
+  const composition = document.getElementById("game-composition");
+  const gameBoard = document.getElementById("game-board");
+  const boardWidth = gameBoard?.getBoundingClientRect().width || composition?.getBoundingClientRect().width || Math.min(width, height);
+  const creditsAvailableWidth = Math.max(1, Math.min(boardWidth - 28, width - 28));
+  const creditsAvailableHeight = Math.max(1, height * 0.88);
+  const creditsScale = Math.min(1, creditsAvailableWidth / 540, creditsAvailableHeight / 360);
+  root.style.setProperty("--credits-scale", `${Math.max(0.1, creditsScale).toFixed(3)}`);
+}
+
+function scheduleViewportSync(): void {
+  syncViewportMetrics();
+  window.requestAnimationFrame(syncViewportMetrics);
+  window.setTimeout(syncViewportMetrics, 120);
+  window.setTimeout(syncViewportMetrics, 420);
+  window.setTimeout(syncViewportMetrics, 900);
+}
+
+scheduleViewportSync();
+window.addEventListener("resize", scheduleViewportSync, { passive: true });
+window.addEventListener("orientationchange", scheduleViewportSync, { passive: true });
+window.addEventListener("pageshow", scheduleViewportSync);
+window.addEventListener("load", scheduleViewportSync, { once: true });
+window.visualViewport?.addEventListener("resize", scheduleViewportSync, { passive: true });
+window.visualViewport?.addEventListener("scroll", scheduleViewportSync, { passive: true });
+
+document.body.classList.add("app-ready");
 
 const STAGE_MAP_STORAGE_KEY = "awesome-superhero.stage1-map.v8";
 const CONTROL_STYLE_STORAGE_KEY = "awesome-superhero.control-style.v4";
@@ -18,6 +50,7 @@ const AVATAR_FRAMING_STORAGE_KEY = "awesome-superhero.avatar-framing.v1";
 const AVATAR_BACKGROUND_STORAGE_KEY = "awesome-superhero.avatar-background.v2";
 const MUSIC_ENABLED_STORAGE_KEY = "awesome-superhero.music-enabled.v1";
 const BUILD_ID = "2026-06-02-stage1-first-pass";
+const EDITOR_ENABLED = isLocalEditorUrl();
 const CREDITS_CONFIG = {
   studentName: "Adam",
   studentVideoUrl: "https://youtu.be/IJtiQkQ0VVA?si=8ISjm8fkp9JLNmDm",
@@ -72,16 +105,21 @@ const AVATAR_BACKGROUND_OPTIONS = [
   { id: "stone", label: "Stone" },
   { id: "black", label: "Black" },
 ] as const;
+const USE_MOBILE_CHARACTER_ASSETS = window.matchMedia("(pointer: coarse), (max-width: 820px), (max-height: 760px)").matches;
 const AVATAR_CHARACTER_OPTIONS = [
   {
     id: "mr-not-so-awesome",
     label: "Mr. Not So Awesome",
-    path: "/assets/characters/MrNotSoAwesomeTexturedBright.glb",
+    path: USE_MOBILE_CHARACTER_ASSETS
+      ? "/assets/characters/MrNotSoAwesomeTexturedBright-mobile.glb"
+      : "/assets/characters/MrNotSoAwesomeTexturedBright.glb",
   },
   {
     id: "mr-awesome",
     label: "Mr. Awesome",
-    path: "/assets/characters/TexturedMeshBright.glb",
+    path: USE_MOBILE_CHARACTER_ASSETS
+      ? "/assets/characters/TexturedMeshBright-mobile.glb"
+      : "/assets/characters/TexturedMeshBright.glb",
   },
 ] as const satisfies readonly AvatarModelDefinition[];
 type ControlStyleId = (typeof CONTROL_STYLE_OPTIONS)[number]["id"];
@@ -101,26 +139,26 @@ interface AvatarFraming {
   zoomPercent: number;
 }
 
-const AVATAR_VERTICAL_LIMITS: Record<AvatarCharacterId, { min: number; max: number }> = {
-  "mr-not-so-awesome": { min: -60, max: 42 },
-  "mr-awesome": { min: -80, max: 80 },
-};
-const AVATAR_ZOOM_MIN = 75;
+const AVATAR_ZOOM_MIN = 55;
 const AVATAR_ZOOM_MAX = 160;
 const AVATAR_ZOOM_DEFAULT = 100;
-const DEFAULT_AVATAR_FRAMING: Record<AvatarCharacterId, AvatarFraming> = {
-  "mr-not-so-awesome": { verticalPercent: -48, zoomPercent: AVATAR_ZOOM_DEFAULT },
-  "mr-awesome": { verticalPercent: 0, zoomPercent: AVATAR_ZOOM_DEFAULT },
+const FIXED_DIALOGUE_AVATAR_FRAMING: Record<AvatarCharacterId, AvatarFraming> = {
+  "mr-not-so-awesome": { verticalPercent: -50, zoomPercent: 90 },
+  "mr-awesome": { verticalPercent: 0, zoomPercent: 58 },
 };
 const storedAvatarState = readStoredAvatarState();
 
+ensureEditorDom();
+
 const gameView = requireElement("#game-view");
 const gameBoard = requireElement("#game-board");
+const bottomLayer = requireElement("#bottom-layer");
 const composition = requireElement("#game-composition");
 const avatarBox = requireElement("[data-villain-avatar]");
 avatarBox.dataset.avatarPortrait = storedAvatarState.characterId;
+composition.classList.add("is-booting");
 const renderer = new ThreeStageRenderer(gameView);
-const villainAvatar = new VillainAvatarRenderer(avatarBox, avatarOptionById(storedAvatarState.characterId));
+const villainAvatar = new VillainAvatarRenderer(avatarBox, avatarOptionById(storedAvatarState.characterId), { deferInitialLoad: true });
 const dialogueDirector = new DialogueDirector();
 const music = new MusicManager();
 const sfx = new SfxManager();
@@ -147,27 +185,30 @@ let dragStart:
   | undefined;
 let pointerStart: { x: number; y: number } | undefined;
 let avatarCharacterId: AvatarCharacterId = storedAvatarState.characterId;
-let avatarVerticalPercent = storedAvatarState.framing[avatarCharacterId].verticalPercent;
 let avatarZoomPercent = storedAvatarState.framing[avatarCharacterId].zoomPercent;
 const avatarFramingByCharacter = new Map<AvatarCharacterId, AvatarFraming>(
   AVATAR_CHARACTER_OPTIONS.map((option) => [option.id, { ...storedAvatarState.framing[option.id] }]),
 );
-let avatarDragStart:
-  | {
-      y: number;
-      verticalPercent: number;
-      target: HTMLElement;
-      pointerId: number;
-    }
-  | undefined;
 let previousTime = performance.now();
 let previousDialogueState: GameState | undefined;
 let lastDialogueKey = "";
+let activeDialogueEventType: DialoguePanel["eventType"] | undefined;
 let musicEnabled = readStoredMusicEnabled();
+type BootPhase = "loading" | "assets" | "dialogue";
+let bootPhase: BootPhase = "loading";
+let bootQuietTimer: number | undefined;
 let openingTutorialDismissed = false;
 let openingTutorialAnimating = false;
+let openingTutorialSuccessVisible = false;
+let openingTutorialSuccessSwapping = false;
+let openingTutorialSfxTimer: number | undefined;
+let openingTutorialSwapTimer: number | undefined;
+let openingTutorialFinishTimer: number | undefined;
 let debugControlsVisible = false;
 let observedRunId = state.runId;
+let bootReady = false;
+let avatarWarmStarted = false;
+let creditsUnlockedThisSession = false;
 
 const elements = {
   dialogueStrip: requireElement<HTMLElement>(".dialogue-strip"),
@@ -214,6 +255,7 @@ const elements = {
   creditContestMagazine: requireElement<HTMLAnchorElement>("[data-credit-contest-magazine]"),
   creditDeveloperName: requireElement<HTMLElement>("[data-credit-developer-name]"),
   creditDeveloperUrl: requireElement<HTMLAnchorElement>("[data-credit-developer-url]"),
+  repeatRoute: requireElement<HTMLButtonElement>("[data-repeat-route]"),
   musicToggle: requireElement<HTMLButtonElement>("[data-music-toggle]"),
 };
 
@@ -222,20 +264,138 @@ sfx.setEnabled(musicEnabled);
 elements.stageMap.value = state.stageMap;
 populateCredits();
 populateCameraControls();
+configureEditorAvailability();
 updateMusicToggle();
 bindButtons();
 bindKeyboard();
 bindPointer();
+bindNativeGestureGuards();
 updateUi();
+startBootReadiness();
 requestAnimationFrame(frame);
 
 window.addEventListener("beforeunload", () => {
+  if (bootQuietTimer !== undefined) window.clearTimeout(bootQuietTimer);
+  if (openingTutorialSfxTimer !== undefined) window.clearTimeout(openingTutorialSfxTimer);
+  if (openingTutorialFinishTimer !== undefined) window.clearTimeout(openingTutorialFinishTimer);
   resizeObserver.disconnect();
   music.dispose();
   sfx.dispose();
   renderer.dispose();
   villainAvatar.dispose();
 });
+
+function ensureEditorDom(): void {
+  const board = document.querySelector<HTMLElement>("#game-board");
+  if (board && !document.querySelector("[data-gameplay-zoom-guide]")) {
+    board.insertAdjacentHTML(
+      "beforeend",
+      `
+        <div class="gameplay-zoom-guide" data-gameplay-zoom-guide hidden aria-hidden="true"></div>
+        <div class="lane-hover-card" data-lane-hover hidden>
+          <span>Lane row</span>
+          <code data-lane-hover-code></code>
+          <textarea data-lane-hover-text spellcheck="false" aria-label="Selected lane row text" hidden></textarea>
+          <button type="button" data-lane-hover-copy>Copy</button>
+          <button type="button" data-lane-hover-edit>Quick Edit</button>
+          <button type="button" data-lane-hover-apply hidden>Apply</button>
+          <button type="button" data-lane-hover-cancel hidden>Cancel</button>
+        </div>
+      `,
+    );
+  }
+
+  const bottomLayer = document.querySelector<HTMLElement>("#bottom-layer");
+  if (bottomLayer && !document.querySelector(".bottom-actions")) {
+    bottomLayer.insertAdjacentHTML(
+      "beforeend",
+      `
+        <div class="bottom-actions">
+          <button type="button" data-action="pause" aria-label="Pause">II</button>
+          <button type="button" data-action="restart" aria-label="Restart">↻</button>
+          <button type="button" data-toggle-map>Map</button>
+        </div>
+      `,
+    );
+  }
+
+  const appShell = document.querySelector<HTMLElement>("#app-shell");
+  if (appShell && !document.querySelector("#map-drawer")) {
+    appShell.insertAdjacentHTML(
+      "beforeend",
+      `
+        <aside id="map-drawer" hidden aria-label="Stage Map Textbox">
+          <div class="drawer-head">
+            <strong>Stage Map Textbox</strong>
+            <span data-map-status data-tone="neutral">Ready</span>
+            <button type="button" class="drawer-close" data-toggle-map aria-label="Close stage map">X</button>
+          </div>
+          <textarea data-stage-map spellcheck="false" aria-label="Stage 1 map text"></textarea>
+          <div class="drawer-actions">
+            <button type="button" data-stage-apply>Apply Map</button>
+            <button type="button" data-stage-copy>Copy Map</button>
+            <button type="button" data-stage-reset>Reset Stage</button>
+            <button type="button" data-stage-validate>Validate Map</button>
+            <button type="button" data-feedback-copy>Copy Feedback Block</button>
+            <button type="button" data-edit-toggle aria-pressed="false">Edit Mode</button>
+          </div>
+          <div class="drawer-camera" data-edit-camera-panel hidden>
+            <label>
+              <span>Avatar Character</span>
+              <select data-avatar-character aria-label="Dialogue avatar character"></select>
+            </label>
+            <label>
+              <span>Avatar Background</span>
+              <select data-avatar-background aria-label="Dialogue avatar background color"></select>
+            </label>
+            <label>
+              <span>Button Style</span>
+              <select data-control-style aria-label="On-screen button style"></select>
+            </label>
+            <label>
+              <span>Background</span>
+              <select data-background-theme aria-label="Temporary background color option"></select>
+            </label>
+            <label>
+              <span>Border Style</span>
+              <select data-border-style aria-label="Temporary border style option"></select>
+            </label>
+            <label>
+              <span>Dialogue Panel</span>
+              <select data-dialogue-panel aria-label="Temporary dialogue panel color option"></select>
+            </label>
+            <label>
+              <span>Editor Angle</span>
+              <select data-camera-preset aria-label="Editor camera angle"></select>
+            </label>
+            <label>
+              <span>Editor Zoom</span>
+              <span class="zoom-range-wrap">
+                <input data-camera-zoom type="range" min="90" max="190" step="5" value="150" aria-label="Editor camera zoom" />
+                <span class="gameplay-zoom-mark" aria-hidden="true"></span>
+              </span>
+            </label>
+            <div class="avatar-drag-control">
+              <span>Avatar Vertical</span>
+              <button type="button" class="avatar-drag-pad" data-avatar-drag aria-label="Drag avatar portrait up or down">
+                <span></span>
+              </button>
+            </div>
+            <div class="avatar-zoom-control">
+              <span>Avatar Zoom</span>
+              <div class="avatar-zoom-buttons">
+                <button type="button" data-avatar-zoom-step="-10" aria-label="Zoom avatar out">-</button>
+                <button type="button" data-avatar-zoom-reset>Default</button>
+                <button type="button" data-avatar-zoom-step="10" aria-label="Zoom avatar in">+</button>
+              </div>
+            </div>
+          </div>
+          <textarea data-stage-validation spellcheck="false" readonly aria-label="Stage 1 validation output"></textarea>
+        </aside>
+      `,
+    );
+  }
+}
 
 function frame(now: number): void {
   const deltaSeconds = Math.min(0.05, (now - previousTime) / 1000);
@@ -244,17 +404,27 @@ function frame(now: number): void {
     requestAnimationFrame(frame);
     return;
   }
+  const creditsOpen = !elements.creditsModal.hidden;
   const previousState = state;
-  state = tickGame(state, deltaSeconds, { hazardsEnabled: !editMode && !cheatMode, stageCompletionEnabled: !editMode, cheatMode });
+  if (!creditsOpen) {
+    state = tickGame(state, deltaSeconds, { hazardsEnabled: !editMode && !cheatMode, stageCompletionEnabled: !editMode, cheatMode });
+  }
+  if (previousState.stage.mode === "finalSequence" && state.runId !== previousState.runId) {
+    creditsUnlockedThisSession = true;
+  }
   if (state.runId !== observedRunId) {
     observedRunId = state.runId;
     resetOpeningTutorial();
     previousDialogueState = undefined;
     lastDialogueKey = "";
+    activeDialogueEventType = undefined;
   }
-  sfx.sync(previousState, state, { cheatMode });
+  if (!creditsOpen) sfx.sync(previousState, state, { cheatMode });
   music.sync(state, { cheatMode });
-  renderer.render(state, deltaSeconds, editSelection, { useStageCamera: !editMode });
+  renderer.render(state, creditsOpen ? 0 : deltaSeconds, editSelection, {
+    useStageCamera: !editMode,
+    targetReminderActive: isFirstStageTargetReminderActive(),
+  });
   updateUi();
   requestAnimationFrame(frame);
 }
@@ -281,21 +451,73 @@ function applyCreditLink(anchor: HTMLAnchorElement, url: string | undefined): vo
   anchor.rel = "noopener noreferrer";
 }
 
+function configureEditorAvailability(): void {
+  document.body.dataset.editorEnabled = String(EDITOR_ENABLED);
+  composition.dataset.editorEnabled = String(EDITOR_ENABLED);
+  if (EDITOR_ENABLED) {
+    elements.mapDrawer.removeAttribute("aria-hidden");
+    elements.mapDrawer.removeAttribute("inert");
+    return;
+  }
+
+  editMode = false;
+  debugControlsVisible = false;
+  elements.bottomActions.hidden = true;
+  elements.statusStrip.hidden = true;
+  elements.mapDrawer.setAttribute("aria-hidden", "true");
+  elements.mapDrawer.setAttribute("inert", "");
+  elements.mapDrawer.remove();
+  elements.laneHover.remove();
+  elements.gameplayZoomGuide.remove();
+  elements.bottomActions.remove();
+}
+
 function openCreditsModal(): void {
+  scheduleViewportSync();
   elements.creditsModal.hidden = false;
   composition.classList.add("is-credits-open");
+  window.requestAnimationFrame(syncViewportMetrics);
   elements.creditsClose.focus();
 }
 
 function closeCreditsModal(): void {
   elements.creditsModal.hidden = true;
   composition.classList.remove("is-credits-open");
+  if (musicEnabled) {
+    unlockMusic();
+    syncMusicNow();
+  }
   elements.creditsOpen.focus();
+}
+
+function isMoveAction(action: MoveAction | GameAction | "toggleMap"): action is MoveAction {
+  return action === "forward" || action === "backward" || action === "left" || action === "right";
+}
+
+function pulseMoveButton(action: MoveAction): void {
+  const button = document.querySelector<HTMLButtonElement>(`[data-move="${action}"]`);
+  if (!button) return;
+  button.classList.remove("is-pressing");
+  // Restart the CSS state even on rapid keyboard taps.
+  window.requestAnimationFrame(() => {
+    button.classList.add("is-pressing");
+    window.setTimeout(() => button.classList.remove("is-pressing"), 150);
+  });
+}
+
+function performMoveAction(move: MoveAction): void {
+  if (!bootReady) return;
+  if (handleOpeningTutorialStart()) return;
+  state = applyAction(state, move, { allowMoveFromTerminal: editMode || cheatMode, cheatMode });
+  syncMusicNow();
+  updateUi();
 }
 
 function bindButtons(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
+    if (!EDITOR_ENABLED && button.closest(".bottom-actions")) return;
     button.addEventListener("click", () => {
+      button.blur();
       unlockMusic();
       const action = button.dataset.action as GameAction | undefined;
       if (!action) return;
@@ -308,34 +530,78 @@ function bindButtons(): void {
   });
 
   document.querySelectorAll<HTMLButtonElement>("[data-move]").forEach((button) => {
-    button.addEventListener("click", () => {
+    const clearPress = () => button.classList.remove("is-pressing");
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      button.classList.add("is-pressing");
       unlockMusic();
       const move = button.dataset.move as MoveAction | undefined;
-      if (!move) return;
-      if (handleOpeningTutorialStart()) return;
-      state = applyAction(state, move, { allowMoveFromTerminal: editMode || cheatMode, cheatMode });
-      syncMusicNow();
-      updateUi();
+      if (move) performMoveAction(move);
+    });
+    button.addEventListener("pointerup", clearPress);
+    button.addEventListener("pointercancel", clearPress);
+    button.addEventListener("pointerleave", clearPress);
+    button.addEventListener("click", (event) => {
+      if (event.detail !== 0) return;
+      button.blur();
+      clearPress();
+      unlockMusic();
+      const move = button.dataset.move as MoveAction | undefined;
+      if (move) performMoveAction(move);
     });
   });
 
-  document.querySelectorAll<HTMLButtonElement>("[data-toggle-map]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const hidden = elements.mapDrawer.hasAttribute("hidden");
-      elements.mapDrawer.toggleAttribute("hidden", !hidden);
-    });
+  bottomLayer.addEventListener("click", (event) => {
+    const target = event.target as Element | null;
+    if (target?.closest("button, a, input, textarea, select")) return;
+    advanceRevealConversationFromUi(event);
   });
 
-  elements.creditsOpen.addEventListener("click", openCreditsModal);
+  if (EDITOR_ENABLED) {
+    document.querySelectorAll<HTMLButtonElement>("[data-toggle-map]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const hidden = elements.mapDrawer.hasAttribute("hidden");
+        elements.mapDrawer.toggleAttribute("hidden", !hidden);
+      });
+    });
+  }
 
-  elements.creditsClose.addEventListener("click", closeCreditsModal);
+  elements.creditsOpen.addEventListener("click", () => {
+    elements.creditsOpen.blur();
+    if (elements.creditsModal.hidden) {
+      openCreditsModal();
+      return;
+    }
+    closeCreditsModal();
+  });
+
+  elements.creditsClose.addEventListener("click", () => {
+    elements.creditsClose.blur();
+    closeCreditsModal();
+  });
 
   elements.creditsModal.addEventListener("click", (event) => {
     if (event.target !== elements.creditsModal) return;
     closeCreditsModal();
   });
 
+  elements.repeatRoute.addEventListener("click", () => {
+    elements.repeatRoute.blur();
+    unlockMusic();
+    state = createInitialState(state.stageMap, state.runId + 1, Math.max(state.bestScore, state.score));
+    resetOpeningTutorial();
+    openingTutorialDismissed = true;
+    observedRunId = state.runId;
+    clearEditSelection();
+    previousDialogueState = undefined;
+    lastDialogueKey = "";
+    activeDialogueEventType = undefined;
+    syncMusicNow();
+    updateUi();
+  });
+
   elements.musicToggle.addEventListener("click", () => {
+    elements.musicToggle.blur();
     musicEnabled = !musicEnabled;
     window.localStorage.setItem(MUSIC_ENABLED_STORAGE_KEY, String(musicEnabled));
     if (musicEnabled) unlockMusic();
@@ -344,6 +610,8 @@ function bindButtons(): void {
     syncMusicNow();
     updateMusicToggle();
   });
+
+  if (!EDITOR_ENABLED) return;
 
   requireElement<HTMLButtonElement>("[data-stage-apply]").addEventListener("click", () => {
     applyMapText(elements.stageMap.value, true, { preservePlayer: editMode });
@@ -603,43 +871,41 @@ function isAvatarBackgroundId(value: unknown): value is AvatarBackgroundId {
   return typeof value === "string" && AVATAR_BACKGROUND_OPTIONS.some((option) => option.id === value);
 }
 
-function applyAvatarCharacter(value: string, options: { persist?: boolean } = {}): void {
+function applyAvatarCharacter(value: string, options: { persist?: boolean; updateSpeakerLabel?: boolean } = {}): void {
   const shouldPersist = options.persist ?? true;
-  if (shouldPersist) {
-    saveCurrentAvatarFraming();
-  } else {
-    avatarFramingByCharacter.set(avatarCharacterId, {
-      verticalPercent: avatarVerticalPercent,
-      zoomPercent: avatarZoomPercent,
-    });
-  }
+  const shouldUpdateSpeakerLabel = options.updateSpeakerLabel ?? true;
   const nextCharacter = isAvatarCharacterId(value) ? value : DEFAULT_AVATAR_CHARACTER;
   const option = avatarOptionById(nextCharacter);
   avatarCharacterId = nextCharacter;
   elements.avatarCharacter.value = nextCharacter;
-  elements.speaker.textContent = option.label;
+  if (shouldUpdateSpeakerLabel) elements.speaker.textContent = option.label;
   avatarBox.dataset.avatarPortrait = nextCharacter;
-  const savedFraming = avatarFramingByCharacter.get(nextCharacter) ?? { verticalPercent: 0, zoomPercent: AVATAR_ZOOM_DEFAULT };
-  avatarVerticalPercent = savedFraming.verticalPercent;
-  avatarZoomPercent = savedFraming.zoomPercent;
   avatarBox.querySelector("span")?.replaceChildren(document.createTextNode(nextCharacter === "mr-awesome" ? "A" : "N"));
-  villainAvatar.setModel(option);
   updateAvatarFraming();
+  void villainAvatar.setModel(option);
   if (shouldPersist) persistAvatarState();
 }
 
-function applyDialogueSpeakerVisual(speaker: "A" | "B"): void {
+function scheduleUiAfterAvatarPaint(): void {
+  requestAnimationFrame(() => requestAnimationFrame(() => updateUi()));
+}
+
+function applyDialogueSpeakerVisual(speaker: "A" | "B"): boolean {
   const nextCharacter: AvatarCharacterId = speaker === "A" ? "mr-awesome" : "mr-not-so-awesome";
   const nextBackground: AvatarBackgroundId = speaker === "A" ? "sky" : "mint";
-  if (avatarCharacterId !== nextCharacter) applyAvatarCharacter(nextCharacter, { persist: false });
-  applyAvatarBackground(nextBackground, { persist: false });
+  const option = avatarOptionById(nextCharacter);
+  if (!villainAvatar.isModelReady(nextCharacter)) {
+    void villainAvatar.preload(option).then(() => scheduleUiAfterAvatarPaint());
+    return false;
+  }
+  if (avatarCharacterId !== nextCharacter) applyAvatarCharacter(nextCharacter, { persist: false, updateSpeakerLabel: false });
+  else if (!villainAvatar.isShowingModel(nextCharacter)) void villainAvatar.setModel(option).then(() => scheduleUiAfterAvatarPaint());
+  if (avatarBox.dataset.avatarBackground !== nextBackground) applyAvatarBackground(nextBackground, { persist: false });
+  return true;
 }
 
 function saveCurrentAvatarFraming(): void {
-  avatarFramingByCharacter.set(avatarCharacterId, {
-    verticalPercent: avatarVerticalPercent,
-    zoomPercent: avatarZoomPercent,
-  });
+  avatarFramingByCharacter.set(avatarCharacterId, { ...FIXED_DIALOGUE_AVATAR_FRAMING[avatarCharacterId] });
   persistAvatarState();
 }
 
@@ -648,32 +914,17 @@ function readStoredAvatarState(): { characterId: AvatarCharacterId; framing: Rec
     ? window.localStorage.getItem(AVATAR_CHARACTER_STORAGE_KEY) as AvatarCharacterId
     : DEFAULT_AVATAR_CHARACTER;
   const framing: Record<AvatarCharacterId, AvatarFraming> = {
-    "mr-not-so-awesome": { ...DEFAULT_AVATAR_FRAMING["mr-not-so-awesome"] },
-    "mr-awesome": { ...DEFAULT_AVATAR_FRAMING["mr-awesome"] },
+    "mr-not-so-awesome": { ...FIXED_DIALOGUE_AVATAR_FRAMING["mr-not-so-awesome"] },
+    "mr-awesome": { ...FIXED_DIALOGUE_AVATAR_FRAMING["mr-awesome"] },
   };
-
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(AVATAR_FRAMING_STORAGE_KEY) ?? "{}") as Partial<Record<AvatarCharacterId, Partial<AvatarFraming>>>;
-    for (const option of AVATAR_CHARACTER_OPTIONS) {
-      const saved = parsed[option.id];
-      if (!saved) continue;
-      const limits = AVATAR_VERTICAL_LIMITS[option.id];
-      framing[option.id] = {
-        verticalPercent: clampNumber(Number(saved.verticalPercent), limits.min, limits.max),
-        zoomPercent: clampNumber(Number(saved.zoomPercent), AVATAR_ZOOM_MIN, AVATAR_ZOOM_MAX),
-      };
-    }
-  } catch {
-    // Ignore malformed saved avatar framing and fall back to defaults.
-  }
 
   return { characterId, framing };
 }
 
 function persistAvatarState(): void {
   const framing: Record<AvatarCharacterId, AvatarFraming> = {
-    "mr-not-so-awesome": avatarFramingByCharacter.get("mr-not-so-awesome") ?? { ...DEFAULT_AVATAR_FRAMING["mr-not-so-awesome"] },
-    "mr-awesome": avatarFramingByCharacter.get("mr-awesome") ?? { ...DEFAULT_AVATAR_FRAMING["mr-awesome"] },
+    "mr-not-so-awesome": { ...FIXED_DIALOGUE_AVATAR_FRAMING["mr-not-so-awesome"] },
+    "mr-awesome": { ...FIXED_DIALOGUE_AVATAR_FRAMING["mr-awesome"] },
   };
   window.localStorage.setItem(AVATAR_CHARACTER_STORAGE_KEY, avatarCharacterId);
   window.localStorage.setItem(AVATAR_FRAMING_STORAGE_KEY, JSON.stringify(framing));
@@ -688,47 +939,16 @@ function isAvatarCharacterId(value: unknown): value is AvatarCharacterId {
 }
 
 function updateAvatarFraming(): void {
+  const fixedFraming = FIXED_DIALOGUE_AVATAR_FRAMING[avatarCharacterId];
+  avatarZoomPercent = fixedFraming.zoomPercent;
   villainAvatar.setFraming({
-    verticalOffsetPercent: avatarVerticalPercent,
-    zoomPercent: avatarZoomPercent,
+    verticalOffsetPercent: fixedFraming.verticalPercent,
+    zoomPercent: fixedFraming.zoomPercent,
   });
 }
 
 function beginAvatarVerticalDrag(event: PointerEvent): void {
-  if (!editMode) return;
-  const target = event.currentTarget;
-  if (!(target instanceof HTMLElement)) return;
-  avatarDragStart = {
-    y: event.clientY,
-    verticalPercent: avatarVerticalPercent,
-    target,
-    pointerId: event.pointerId,
-  };
-  target.setPointerCapture?.(event.pointerId);
-  document.body.classList.add("is-avatar-dragging");
-  window.addEventListener("pointermove", handleAvatarVerticalDrag, { passive: false });
-  window.addEventListener("pointerup", endAvatarVerticalDrag, { once: true });
-  window.addEventListener("pointercancel", endAvatarVerticalDrag, { once: true });
   event.preventDefault();
-}
-
-function handleAvatarVerticalDrag(event: PointerEvent): void {
-  if (!avatarDragStart) return;
-  const deltaY = event.clientY - avatarDragStart.y;
-  const verticalLimits = AVATAR_VERTICAL_LIMITS[avatarCharacterId];
-  avatarVerticalPercent = clampNumber(avatarDragStart.verticalPercent - deltaY * 0.55, verticalLimits.min, verticalLimits.max);
-  updateAvatarFraming();
-  event.preventDefault();
-}
-
-function endAvatarVerticalDrag(): void {
-  if (avatarDragStart) avatarDragStart.target.releasePointerCapture?.(avatarDragStart.pointerId);
-  saveCurrentAvatarFraming();
-  avatarDragStart = undefined;
-  document.body.classList.remove("is-avatar-dragging");
-  window.removeEventListener("pointermove", handleAvatarVerticalDrag);
-  window.removeEventListener("pointerup", endAvatarVerticalDrag);
-  window.removeEventListener("pointercancel", endAvatarVerticalDrag);
 }
 
 function updateGameplayZoomGuide(): void {
@@ -745,6 +965,14 @@ function unlockMusic(): void {
 
 function syncMusicNow(): void {
   music.sync(state, { cheatMode });
+}
+
+function isFirstStageTargetReminderActive(): boolean {
+  return activeDialogueEventType === "TARGET_MISSED"
+    && state.stage.mode === "chase"
+    && state.stage.catchCount === 0
+    && !state.stage.introCameraHandoffDone
+    && state.stage.target.visible;
 }
 
 function readStoredMusicEnabled(): boolean {
@@ -784,7 +1012,7 @@ function bindKeyboard(): void {
       closeCreditsModal();
       return;
     }
-    if (event.key === "Tab" && !isTypingTarget(event.target)) {
+    if (EDITOR_ENABLED && event.key === "Tab" && !isTypingTarget(event.target)) {
       event.preventDefault();
       debugControlsVisible = !debugControlsVisible;
       updateUi();
@@ -794,20 +1022,30 @@ function bindKeyboard(): void {
     unlockMusic();
     if (event.key === "CapsLock") {
       event.preventDefault();
-      cheatMode = !cheatMode;
-      if (cheatMode) state = enterCheatMode(state);
+      const nextCheatMode = !cheatMode;
+      cheatMode = nextCheatMode;
+      state = cheatMode ? enterCheatMode(state) : advanceTargetToNextSpawn(state);
       syncMusicNow();
       setMapStatus(cheatMode ? "Cheat Mode on. Hazards are disabled." : "Cheat Mode off.", cheatMode ? "ok" : "neutral");
       updateUi();
       return;
     }
-    if (editMode && handleEditKey(event)) return;
+    if (EDITOR_ENABLED && editMode && handleEditKey(event)) return;
     const mapped = keyMap.get(event.key);
     if (!mapped) return;
     event.preventDefault();
+    if (!bootReady) return;
+    if (isMoveAction(mapped)) pulseMoveButton(mapped);
+    if (cheatMode && event.shiftKey && isMoveAction(mapped)) {
+      state = jumpCheatToEnding(state);
+      syncMusicNow();
+      setMapStatus("Cheat Mode ending jump.", "ok");
+      updateUi();
+      return;
+    }
     if (mapped !== "toggleMap" && handleOpeningTutorialStart()) return;
     if (mapped === "toggleMap") {
-      elements.mapDrawer.toggleAttribute("hidden");
+      if (EDITOR_ENABLED) elements.mapDrawer.toggleAttribute("hidden");
       return;
     }
     state = applyAction(state, mapped, { allowMoveFromTerminal: editMode || cheatMode, cheatMode });
@@ -816,10 +1054,52 @@ function bindKeyboard(): void {
   }, { capture: true });
 }
 
+function bindNativeGestureGuards(): void {
+  const shouldKeepNativeGesture = (target: EventTarget | null) => isTypingTarget(target);
+  const blockNativeGesture = (event: Event) => {
+    if (shouldKeepNativeGesture(event.target)) return;
+    event.preventDefault();
+  };
+  const blockMultiTouch = (event: TouchEvent) => {
+    if (shouldKeepNativeGesture(event.target)) return;
+    if (event.touches.length > 1) event.preventDefault();
+  };
+  let lastTouchEndAt = 0;
+  const blockRapidRetap = (event: TouchEvent) => {
+    if (shouldKeepNativeGesture(event.target)) return;
+    const now = window.performance.now();
+    if (now - lastTouchEndAt < 320) event.preventDefault();
+    lastTouchEndAt = now;
+  };
+
+  for (const eventName of ["contextmenu", "selectstart", "dragstart", "dblclick"] as const) {
+    composition.addEventListener(eventName, blockNativeGesture, { capture: true });
+  }
+
+  for (const eventName of ["gesturestart", "gesturechange", "gestureend"] as const) {
+    document.addEventListener(eventName, blockNativeGesture, { capture: true, passive: false });
+  }
+
+  composition.addEventListener("touchstart", blockMultiTouch, { capture: true, passive: false });
+  composition.addEventListener("touchmove", blockNativeGesture, { capture: true, passive: false });
+  composition.addEventListener("touchend", blockRapidRetap, { capture: true, passive: false });
+}
+
+function advanceRevealConversationFromUi(event?: Event): boolean {
+  if (cheatMode || !isRevealConversationActive(state)) return false;
+  event?.preventDefault();
+  unlockMusic();
+  state = applyAction(state, "forward", { cheatMode });
+  syncMusicNow();
+  updateUi();
+  return true;
+}
+
 function bindPointer(): void {
   gameView.addEventListener("pointerdown", (event) => {
     unlockMusic();
-    if (editMode) {
+    if (!bootReady) return;
+    if (EDITOR_ENABLED && editMode) {
       const tile = renderer.getTileFromPointer(event);
       const stage = parseStageMap(state.stageMap).stage;
       const object = tile && stage ? objectAt(stage, tile) : undefined;
@@ -845,7 +1125,7 @@ function bindPointer(): void {
   });
 
   gameView.addEventListener("pointermove", (event) => {
-    if (!editMode) return;
+    if (!EDITOR_ENABLED || !editMode) return;
     const tile = renderer.getTileFromPointer(event);
     hoveredTile = tile;
     if (tile && dragStart) {
@@ -858,7 +1138,7 @@ function bindPointer(): void {
   });
 
   gameView.addEventListener("pointerup", (event) => {
-    if (editMode && dragStart) {
+    if (EDITOR_ENABLED && editMode && dragStart) {
       const tile = renderer.getTileFromPointer(event);
       const stage = parseStageMap(state.stageMap).stage;
       if (tile && stage) {
@@ -879,6 +1159,7 @@ function bindPointer(): void {
     const dy = event.clientY - pointerStart.y;
     pointerStart = undefined;
     if (handleOpeningTutorialStart()) return;
+    if (advanceRevealConversationFromUi(event)) return;
     const threshold = 26;
     if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) {
       state = applyAction(state, "forward", { allowMoveFromTerminal: cheatMode, cheatMode });
@@ -1000,10 +1281,24 @@ function updateUi(): void {
   elements.clearOverlay.hidden = state.phase !== "complete";
   elements.crashOverlay.hidden = state.phase !== "crashed";
   updateOpeningTutorialVisuals();
-  let nextDialogue = dialogueDirector.update(previousDialogueState, state, { editMode, cheatMode });
-  if ((openingTutorialDismissed || openingTutorialAnimating) && nextDialogue?.eventType === "OPENING_TUTORIAL") nextDialogue = undefined;
+  let nextDialogue: DialoguePanel | undefined = bootPhase === "dialogue"
+    ? dialogueDirector.update(previousDialogueState, state, { editMode, cheatMode })
+    : undefined;
+  if (openingTutorialSuccessSwapping) {
+    nextDialogue = undefined;
+  } else if (openingTutorialSuccessVisible) {
+    nextDialogue = {
+      speaker: "A",
+      speakerLabel: "MR. AWESOME",
+      text: "Yummy~",
+      tone: "success",
+      eventType: "OPENING_TUTORIAL",
+    };
+  }
+  if (!openingTutorialSuccessVisible && openingTutorialDismissed && nextDialogue?.eventType === "OPENING_TUTORIAL") nextDialogue = undefined;
   previousDialogueState = state;
   if (!nextDialogue) {
+    activeDialogueEventType = undefined;
     elements.dialogueStrip.classList.add("is-dialogue-hidden");
     elements.dialogueStrip.setAttribute("aria-hidden", "true");
     elements.speaker.textContent = "";
@@ -1012,36 +1307,65 @@ function updateUi(): void {
     lastDialogueKey = "";
     return;
   }
+  if (!applyDialogueSpeakerVisual(nextDialogue.speaker)) {
+    activeDialogueEventType = undefined;
+    if (!lastDialogueKey) {
+      elements.dialogueStrip.classList.add("is-dialogue-hidden");
+      elements.dialogueStrip.setAttribute("aria-hidden", "true");
+    }
+    return;
+  }
   elements.dialogueStrip.classList.remove("is-dialogue-hidden");
   elements.dialogueStrip.removeAttribute("aria-hidden");
-  applyDialogueSpeakerVisual(nextDialogue.speaker);
+  activeDialogueEventType = nextDialogue.eventType;
   elements.speaker.textContent = nextDialogue.speakerLabel;
   elements.message.dataset.tone = nextDialogue.tone;
   const nextDialogueKey = `${nextDialogue.speaker}:${nextDialogue.text}`;
   if (nextDialogueKey !== lastDialogueKey) {
+    const isOpeningTutorialDialogue = nextDialogue.eventType === "OPENING_TUTORIAL";
+    const isFirstFinalEndingLine = nextDialogue.eventType === "FINAL_ENDING" && lastDialogueKey === "";
+    const suppressBootPressAnimation = nextDialogue.eventType === "OPENING_TUTORIAL"
+      && openingTutorialAnimating
+      && !openingTutorialSuccessVisible;
     elements.message.textContent = nextDialogue.text;
     elements.dialogueStrip.classList.remove("is-dialogue-entering");
     elements.message.classList.remove("is-message-entering");
-    void elements.dialogueStrip.offsetWidth;
-    elements.dialogueStrip.classList.add("is-dialogue-entering");
-    elements.message.classList.add("is-message-entering");
-    sfx.playDialogueBlip(nextDialogue.speaker, state.time);
+    if (!suppressBootPressAnimation && !isOpeningTutorialDialogue && !isFirstFinalEndingLine) {
+      void elements.dialogueStrip.offsetWidth;
+      elements.dialogueStrip.classList.add("is-dialogue-entering");
+      elements.message.classList.add("is-message-entering");
+    } else if (!suppressBootPressAnimation && isOpeningTutorialDialogue && lastDialogueKey === "") {
+      void elements.dialogueStrip.offsetWidth;
+      elements.dialogueStrip.classList.add("is-dialogue-entering");
+    }
     lastDialogueKey = nextDialogueKey;
   }
 }
 
 function updateOpeningTutorialVisuals(): void {
-  const active = shouldShowOpeningTutorial();
+  const active = bootPhase !== "loading" && shouldShowOpeningTutorial();
+  const finalConversationActive = !cheatMode && state.stage.mode === "finalSequence";
+  const finalFadeActive = finalConversationActive
+    && state.stage.finalFadeStartedAt !== undefined
+    && state.time >= state.stage.finalFadeStartedAt;
   composition.classList.toggle("is-opening-tutorial", active);
+  composition.classList.toggle("is-opening-assets", active && bootPhase === "assets");
+  composition.classList.toggle(
+    "is-opening-dialogue-message",
+    active && bootPhase === "dialogue" && (!openingTutorialAnimating || openingTutorialSuccessVisible),
+  );
   composition.classList.toggle("is-opening-tutorial-idle", active && !openingTutorialAnimating && state.time >= 3);
   composition.classList.toggle("is-opening-tutorial-exiting", active && openingTutorialAnimating);
+  composition.classList.toggle("is-reveal-conversation-locked", !cheatMode && isRevealConversationActive(state));
+  composition.classList.toggle("is-final-conversation", finalConversationActive);
+  composition.classList.toggle("is-final-fading", finalFadeActive);
+  composition.classList.toggle("is-credits-unlocked", creditsUnlockedThisSession);
   composition.classList.toggle("is-debug-controls-visible", debugControlsVisible);
-  elements.statusStrip.hidden = !debugControlsVisible;
-  elements.bottomActions.hidden = !debugControlsVisible;
+  elements.statusStrip.hidden = !EDITOR_ENABLED || !debugControlsVisible;
+  elements.bottomActions.hidden = !EDITOR_ENABLED || !debugControlsVisible;
 }
 
 function shouldShowOpeningTutorial(): boolean {
-  if (!editMode && !cheatMode && state.stage.mode === "postVictoryTutorial") return true;
   const atStartTile = state.player.x === state.stage.playerStart.x
     && state.player.z === state.stage.playerStart.z
     && !state.player.hop;
@@ -1057,28 +1381,134 @@ function shouldShowOpeningTutorial(): boolean {
 
 function handleOpeningTutorialStart(): boolean {
   if (!shouldShowOpeningTutorial()) return false;
-  if (state.stage.mode === "postVictoryTutorial") {
-    state = createInitialState(state.stageMap, state.runId + 1, Math.max(state.bestScore, state.score));
-    resetOpeningTutorial();
-    previousDialogueState = undefined;
-    lastDialogueKey = "";
-    updateUi();
-    return true;
-  }
   if (openingTutorialAnimating) return true;
+  const inputBeforeBootDialogue = bootPhase !== "dialogue" || lastDialogueKey === "";
+  if (bootQuietTimer !== undefined) {
+    window.clearTimeout(bootQuietTimer);
+    bootQuietTimer = undefined;
+  }
+  if (inputBeforeBootDialogue) {
+    bootPhase = "dialogue";
+    bootReady = true;
+  }
   openingTutorialAnimating = true;
+  openingTutorialSuccessVisible = false;
+  openingTutorialSuccessSwapping = inputBeforeBootDialogue;
+  if (openingTutorialSfxTimer !== undefined) window.clearTimeout(openingTutorialSfxTimer);
+  if (openingTutorialSwapTimer !== undefined) window.clearTimeout(openingTutorialSwapTimer);
+  if (openingTutorialFinishTimer !== undefined) window.clearTimeout(openingTutorialFinishTimer);
+  openingTutorialSfxTimer = window.setTimeout(() => {
+    openingTutorialSfxTimer = undefined;
+    sfx.playTutorialPickup();
+    if (inputBeforeBootDialogue) {
+      openingTutorialSuccessSwapping = false;
+      openingTutorialSuccessVisible = true;
+      previousDialogueState = undefined;
+      lastDialogueKey = "";
+      activeDialogueEventType = undefined;
+      updateUi();
+      return;
+    }
+    openingTutorialSuccessSwapping = false;
+    openingTutorialSuccessVisible = true;
+    previousDialogueState = undefined;
+    activeDialogueEventType = undefined;
+    updateUi();
+  }, 900);
   updateUi();
-  window.setTimeout(() => {
+  openingTutorialFinishTimer = window.setTimeout(() => {
+    openingTutorialFinishTimer = undefined;
     openingTutorialDismissed = true;
     openingTutorialAnimating = false;
+    openingTutorialSuccessVisible = false;
+    openingTutorialSuccessSwapping = false;
+    if (openingTutorialSwapTimer !== undefined) {
+      window.clearTimeout(openingTutorialSwapTimer);
+      openingTutorialSwapTimer = undefined;
+    }
+    previousDialogueState = undefined;
+    lastDialogueKey = "";
+    activeDialogueEventType = undefined;
     updateUi();
-  }, 1360);
+  }, 2700);
   return true;
 }
 
 function resetOpeningTutorial(): void {
+  activeDialogueEventType = undefined;
   openingTutorialDismissed = false;
   openingTutorialAnimating = false;
+  openingTutorialSuccessVisible = false;
+  openingTutorialSuccessSwapping = false;
+  if (openingTutorialSfxTimer !== undefined) {
+    window.clearTimeout(openingTutorialSfxTimer);
+    openingTutorialSfxTimer = undefined;
+  }
+  if (openingTutorialSwapTimer !== undefined) {
+    window.clearTimeout(openingTutorialSwapTimer);
+    openingTutorialSwapTimer = undefined;
+  }
+  if (openingTutorialFinishTimer !== undefined) {
+    window.clearTimeout(openingTutorialFinishTimer);
+    openingTutorialFinishTimer = undefined;
+  }
+}
+
+function startBootReadiness(): void {
+  const openingAssets = Array.from(document.querySelectorAll<HTMLImageElement>(".opening-tutorial-asset"))
+    .map((image) => waitForImage(image));
+  const fontReady = document.fonts?.ready ?? Promise.resolve();
+  const revealAssets = () => {
+    bootPhase = "assets";
+    composition.classList.remove("is-booting");
+    updateUi();
+    warmAvatarAssetsSoon();
+    if (bootQuietTimer !== undefined) window.clearTimeout(bootQuietTimer);
+    const openingDelay = new Promise<void>((resolve) => {
+      bootQuietTimer = window.setTimeout(() => {
+        bootQuietTimer = undefined;
+        resolve();
+      }, 300);
+    });
+    Promise.allSettled([openingDelay, villainAvatar.preload(avatarOptionById("mr-awesome"))]).then(() => {
+      bootQuietTimer = undefined;
+      bootPhase = "dialogue";
+      bootReady = true;
+      previousDialogueState = undefined;
+      lastDialogueKey = "";
+      activeDialogueEventType = undefined;
+      updateUi();
+    });
+  };
+  Promise.allSettled([...openingAssets, fontReady])
+    .then(revealAssets)
+    .catch(revealAssets);
+}
+
+function warmAvatarAssetsSoon(): void {
+  if (avatarWarmStarted) return;
+  avatarWarmStarted = true;
+  const warm = () => {
+    for (const option of AVATAR_CHARACTER_OPTIONS) {
+      void villainAvatar.preload(option);
+    }
+  };
+  const requestIdle = (window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+  }).requestIdleCallback;
+  if (requestIdle) {
+    requestIdle(warm, { timeout: 1400 });
+    return;
+  }
+  globalThis.setTimeout(warm, 250);
+}
+
+function waitForImage(image: HTMLImageElement): Promise<void> {
+  if (image.complete && image.naturalWidth > 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    image.addEventListener("load", () => resolve(), { once: true });
+    image.addEventListener("error", () => resolve(), { once: true });
+  });
 }
 
 function readStoredStageMap(): string {
@@ -1286,6 +1716,11 @@ function requireElement<T extends HTMLElement = HTMLElement>(selector: string): 
   const element = document.querySelector<T>(selector);
   if (!element) throw new Error(`Missing required DOM element: ${selector}`);
   return element;
+}
+
+function isLocalEditorUrl(): boolean {
+  const host = window.location.hostname;
+  return (host === "localhost" || host === "127.0.0.1" || host === "::1") && new URLSearchParams(window.location.search).get("editor") === "1";
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
